@@ -1,177 +1,211 @@
-import mysql from 'mysql2/promise';
-import path from 'path';
-import fs from 'fs';
-import dotenv from 'dotenv';
-import bcrypt from 'bcryptjs';
-
-dotenv.config({ path: path.join(__dirname, '../../.env') });
-
-// Dynamic imports for mssql/sqlite3 — they are optional and may not be installed (e.g. on Linux servers using MySQL only)
-let sql: any = null;
-let sqlite3: any = null;
-
-async function loadMssql() {
-  if (!sql) {
-    try { sql = (await import('mssql')).default; } catch { sql = null; }
-  }
-  return sql;
-}
-
-async function loadSqlite3() {
-  if (!sqlite3) {
-    try { sqlite3 = (await import('sqlite3')).default; } catch { sqlite3 = null; }
-  }
-  return sqlite3;
-}
-
-const isTrusted = process.env.DB_TRUSTED_CONNECTION === 'true';
-
-let mssqlConfig: any = null;
-
-function getMssqlConfig() {
-  if (!mssqlConfig) {
-    mssqlConfig = {
-      server: process.env.DB_SERVER || 'localhost',
-      database: process.env.DB_DATABASE || 'CompanyTaskDB',
-      port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 1433,
-      user: isTrusted ? undefined : process.env.DB_USER,
-      password: isTrusted ? undefined : process.env.DB_PASSWORD,
-      options: {
-        encrypt: process.env.DB_ENCRYPT === 'true',
-        trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
-        enableArithAbort: true,
-      },
-      connectionTimeout: 2000,
-      requestTimeout: 10000,
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
     };
-  }
-  return mssqlConfig;
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.sql = void 0;
+exports.getDbPool = getDbPool;
+exports.executeQuery = executeQuery;
+const promise_1 = __importDefault(require("mysql2/promise"));
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
+const dotenv_1 = __importDefault(require("dotenv"));
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+dotenv_1.default.config({ path: path_1.default.join(__dirname, '../../.env') });
+// Dynamic imports for mssql/sqlite3 — they are optional and may not be installed (e.g. on Linux servers using MySQL only)
+let sql = null;
+exports.sql = sql;
+let sqlite3 = null;
+async function loadMssql() {
+    if (!sql) {
+        try {
+            exports.sql = sql = (await Promise.resolve().then(() => __importStar(require('mssql')))).default;
+        }
+        catch {
+            exports.sql = sql = null;
+        }
+    }
+    return sql;
 }
-
-let mssqlPool: any = null;
-let sqliteDb: any = null;
-let mysqlPool: mysql.Pool | null = null;
-let activeEngine: 'mssql' | 'sqlite' | 'mysql' | null = null;
+async function loadSqlite3() {
+    if (!sqlite3) {
+        try {
+            sqlite3 = (await Promise.resolve().then(() => __importStar(require('sqlite3')))).default;
+        }
+        catch {
+            sqlite3 = null;
+        }
+    }
+    return sqlite3;
+}
+const isTrusted = process.env.DB_TRUSTED_CONNECTION === 'true';
+let mssqlConfig = null;
+function getMssqlConfig() {
+    if (!mssqlConfig) {
+        mssqlConfig = {
+            server: process.env.DB_SERVER || 'localhost',
+            database: process.env.DB_DATABASE || 'CompanyTaskDB',
+            port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 1433,
+            user: isTrusted ? undefined : process.env.DB_USER,
+            password: isTrusted ? undefined : process.env.DB_PASSWORD,
+            options: {
+                encrypt: process.env.DB_ENCRYPT === 'true',
+                trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
+                enableArithAbort: true,
+            },
+            connectionTimeout: 2000,
+            requestTimeout: 10000,
+        };
+    }
+    return mssqlConfig;
+}
+let mssqlPool = null;
+let sqliteDb = null;
+let mysqlPool = null;
+let activeEngine = null;
 let isInitializing = false;
-
-export async function getDbPool(): Promise<any> {
-  if (activeEngine === 'mssql' && mssqlPool && mssqlPool.connected) {
+async function getDbPool() {
+    if (activeEngine === 'mssql' && mssqlPool && mssqlPool.connected) {
+        return mssqlPool;
+    }
+    if (activeEngine === 'sqlite' && sqliteDb) {
+        return sqliteDb;
+    }
+    if (activeEngine === 'mysql' && mysqlPool) {
+        return mysqlPool;
+    }
+    if (activeEngine === null && !isInitializing) {
+        isInitializing = true;
+        if (process.env.DB_ENGINE === 'mysql') {
+            console.log(`[Database] Initializing MySQL/MariaDB connection.`);
+            activeEngine = 'mysql';
+            const pool = await initMysql();
+            isInitializing = false;
+            return pool;
+        }
+        if (process.env.DB_ENGINE === 'sqlite') {
+            console.log(`[Database] Initializing Integrated Local Enterprise SQLite Engine (Instant Mode).`);
+            activeEngine = 'sqlite';
+            const db = await initSqlite();
+            isInitializing = false;
+            return db;
+        }
+        try {
+            const mssqlModule = await loadMssql();
+            if (!mssqlModule)
+                throw new Error('mssql module not available');
+            const cfg = getMssqlConfig();
+            const testPool = new mssqlModule.ConnectionPool(cfg);
+            await testPool.connect();
+            mssqlPool = testPool;
+            activeEngine = 'mssql';
+            isInitializing = false;
+            console.log(`[Database] Connected successfully to Microsoft SQL Server (${cfg.server} / ${cfg.database})`);
+            return mssqlPool;
+        }
+        catch (err) {
+            console.log(`[Database] SQL Server not available (${err.message}).`);
+            console.log(`[Database] Initializing Integrated Local Enterprise SQLite Engine.`);
+            activeEngine = 'sqlite';
+            const db = await initSqlite();
+            isInitializing = false;
+            return db;
+        }
+    }
+    if (activeEngine === 'sqlite') {
+        return initSqlite();
+    }
+    if (activeEngine === 'mysql') {
+        return mysqlPool;
+    }
     return mssqlPool;
-  }
-  if (activeEngine === 'sqlite' && sqliteDb) {
-    return sqliteDb;
-  }
-  if (activeEngine === 'mysql' && mysqlPool) {
-    return mysqlPool;
-  }
-
-  if (activeEngine === null && !isInitializing) {
-    isInitializing = true;
-
-    if (process.env.DB_ENGINE === 'mysql') {
-      console.log(`[Database] Initializing MySQL/MariaDB connection.`);
-      activeEngine = 'mysql';
-      const pool = await initMysql();
-      isInitializing = false;
-      return pool;
-    }
-
-    if (process.env.DB_ENGINE === 'sqlite') {
-      console.log(`[Database] Initializing Integrated Local Enterprise SQLite Engine (Instant Mode).`);
-      activeEngine = 'sqlite';
-      const db = await initSqlite();
-      isInitializing = false;
-      return db;
-    }
-    try {
-      const mssqlModule = await loadMssql();
-      if (!mssqlModule) throw new Error('mssql module not available');
-      const cfg = getMssqlConfig();
-      const testPool = new mssqlModule.ConnectionPool(cfg);
-      await testPool.connect();
-      mssqlPool = testPool;
-      activeEngine = 'mssql';
-      isInitializing = false;
-      console.log(`[Database] Connected successfully to Microsoft SQL Server (${cfg.server} / ${cfg.database})`);
-      return mssqlPool;
-    } catch (err: any) {
-      console.log(`[Database] SQL Server not available (${err.message}).`);
-      console.log(`[Database] Initializing Integrated Local Enterprise SQLite Engine.`);
-      activeEngine = 'sqlite';
-      const db = await initSqlite();
-      isInitializing = false;
-      return db;
-    }
-  }
-
-  if (activeEngine === 'sqlite') {
-    return initSqlite();
-  }
-  if (activeEngine === 'mysql') {
-    return mysqlPool;
-  }
-
-  return mssqlPool;
 }
-
-async function initSqlite(): Promise<any> {
-  if (sqliteDb) return sqliteDb;
-
-  const sqlite3Module = await loadSqlite3();
-  if (!sqlite3Module) throw new Error('sqlite3 module not available — install sqlite3 or use DB_ENGINE=mysql');
-
-  return new Promise((resolve, reject) => {
-    const dbPath = path.join(__dirname, '../../database/company_task.db');
-    const dbDir = path.dirname(dbPath);
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true });
-    }
-
-    sqliteDb = new sqlite3Module.Database(dbPath, async (err: Error | null) => {
-      if (err) {
-        return reject(err);
-      }
-      console.log(`[Database] SQLite Engine active at ${dbPath}`);
-      try {
-        await initSqliteSchemaAndSeed();
-        resolve(sqliteDb!);
-      } catch (setupErr) {
-        reject(setupErr);
-      }
+async function initSqlite() {
+    if (sqliteDb)
+        return sqliteDb;
+    const sqlite3Module = await loadSqlite3();
+    if (!sqlite3Module)
+        throw new Error('sqlite3 module not available — install sqlite3 or use DB_ENGINE=mysql');
+    return new Promise((resolve, reject) => {
+        const dbPath = path_1.default.join(__dirname, '../../database/company_task.db');
+        const dbDir = path_1.default.dirname(dbPath);
+        if (!fs_1.default.existsSync(dbDir)) {
+            fs_1.default.mkdirSync(dbDir, { recursive: true });
+        }
+        sqliteDb = new sqlite3Module.Database(dbPath, async (err) => {
+            if (err) {
+                return reject(err);
+            }
+            console.log(`[Database] SQLite Engine active at ${dbPath}`);
+            try {
+                await initSqliteSchemaAndSeed();
+                resolve(sqliteDb);
+            }
+            catch (setupErr) {
+                reject(setupErr);
+            }
+        });
     });
-  });
 }
-
-async function initMysql(): Promise<mysql.Pool> {
-  if (mysqlPool) return mysqlPool;
-
-  mysqlPool = mysql.createPool({
-    host: process.env.MYSQL_HOST || process.env.DB_SERVER || 'localhost',
-    port: parseInt(process.env.MYSQL_PORT || process.env.DB_PORT || '3306', 10),
-    user: process.env.MYSQL_USER || process.env.DB_USER || 'root',
-    password: process.env.MYSQL_PASSWORD || process.env.DB_PASSWORD || '',
-    database: process.env.MYSQL_DATABASE || process.env.DB_DATABASE || 'company_task_db',
-    waitForConnections: true,
-    connectionLimit: 10,
-    charset: 'utf8mb4',
-  });
-
-  const conn = await mysqlPool.getConnection();
-  console.log(`[Database] MySQL/MariaDB connected to ${process.env.MYSQL_HOST || process.env.DB_SERVER || 'localhost'}/${process.env.MYSQL_DATABASE || process.env.DB_DATABASE || 'company_task_db'}`);
-  conn.release();
-
-  await initMysqlSchemaAndSeed();
-  return mysqlPool;
+async function initMysql() {
+    if (mysqlPool)
+        return mysqlPool;
+    mysqlPool = promise_1.default.createPool({
+        host: process.env.MYSQL_HOST || process.env.DB_SERVER || 'localhost',
+        port: parseInt(process.env.MYSQL_PORT || process.env.DB_PORT || '3306', 10),
+        user: process.env.MYSQL_USER || process.env.DB_USER || 'root',
+        password: process.env.MYSQL_PASSWORD || process.env.DB_PASSWORD || '',
+        database: process.env.MYSQL_DATABASE || process.env.DB_DATABASE || 'company_task_db',
+        waitForConnections: true,
+        connectionLimit: 10,
+        charset: 'utf8mb4',
+    });
+    const conn = await mysqlPool.getConnection();
+    console.log(`[Database] MySQL/MariaDB connected to ${process.env.MYSQL_HOST || process.env.DB_SERVER || 'localhost'}/${process.env.MYSQL_DATABASE || process.env.DB_DATABASE || 'company_task_db'}`);
+    conn.release();
+    await initMysqlSchemaAndSeed();
+    return mysqlPool;
 }
-
 async function initMysqlSchemaAndSeed() {
-  if (!mysqlPool) return;
-
-  const runSql = async (sqlText: string) => {
-    await mysqlPool!.execute(sqlText);
-  };
-
-  await runSql(`
+    if (!mysqlPool)
+        return;
+    const runSql = async (sqlText) => {
+        await mysqlPool.execute(sqlText);
+    };
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Companies (
       CompanyID INT PRIMARY KEY AUTO_INCREMENT,
       ParentCompanyID INT,
@@ -206,8 +240,7 @@ async function initMysqlSchemaAndSeed() {
       TenantID INT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS UserCompany (
       UserCompanyID INT PRIMARY KEY AUTO_INCREMENT,
       UserID INT NOT NULL,
@@ -219,8 +252,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Departments (
       DepartmentID INT PRIMARY KEY AUTO_INCREMENT,
       CompanyID INT NOT NULL,
@@ -233,8 +265,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Employees (
       EmployeeID INT PRIMARY KEY AUTO_INCREMENT,
       CompanyID INT NOT NULL,
@@ -254,8 +285,7 @@ async function initMysqlSchemaAndSeed() {
       TenantID INT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Roles (
       RoleID INT PRIMARY KEY AUTO_INCREMENT,
       RoleName VARCHAR(200) NOT NULL,
@@ -267,8 +297,7 @@ async function initMysqlSchemaAndSeed() {
       TenantID INT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Permissions (
       PermissionID INT PRIMARY KEY AUTO_INCREMENT,
       PermissionCode VARCHAR(200) UNIQUE NOT NULL,
@@ -277,8 +306,7 @@ async function initMysqlSchemaAndSeed() {
       Description VARCHAR(500)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS RolePermissions (
       RolePermissionID INT PRIMARY KEY AUTO_INCREMENT,
       RoleID INT NOT NULL,
@@ -286,8 +314,7 @@ async function initMysqlSchemaAndSeed() {
       UNIQUE KEY uq_role_perm (RoleID, PermissionID)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Users (
       UserID INT PRIMARY KEY AUTO_INCREMENT,
       CompanyID INT,
@@ -308,8 +335,7 @@ async function initMysqlSchemaAndSeed() {
       MustChangePassword TINYINT DEFAULT 0
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Locations (
       LocationID INT PRIMARY KEY AUTO_INCREMENT,
       CompanyID INT NOT NULL,
@@ -326,8 +352,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS DateCategories (
       CategoryID INT PRIMARY KEY AUTO_INCREMENT,
       CategoryName VARCHAR(500) NOT NULL,
@@ -338,8 +363,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS ImportantDates (
       ImportantDateID INT PRIMARY KEY AUTO_INCREMENT,
       CompanyID INT NOT NULL,
@@ -367,8 +391,7 @@ async function initMysqlSchemaAndSeed() {
       UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Tasks (
       TaskID INT PRIMARY KEY AUTO_INCREMENT,
       CompanyID INT NOT NULL,
@@ -395,8 +418,7 @@ async function initMysqlSchemaAndSeed() {
       UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskAssignees (
       TaskAssigneeID INT PRIMARY KEY AUTO_INCREMENT,
       TaskID INT NOT NULL,
@@ -405,8 +427,7 @@ async function initMysqlSchemaAndSeed() {
       Status VARCHAR(50) DEFAULT 'Active'
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskComments (
       CommentID INT PRIMARY KEY AUTO_INCREMENT,
       TaskID INT NOT NULL,
@@ -415,8 +436,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskAttachments (
       AttachmentID INT PRIMARY KEY AUTO_INCREMENT,
       TaskID INT NOT NULL,
@@ -427,8 +447,7 @@ async function initMysqlSchemaAndSeed() {
       UploadedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskActivities (
       ActivityID INT PRIMARY KEY AUTO_INCREMENT,
       TaskID INT NOT NULL,
@@ -440,8 +459,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS AuditLogs (
       AuditID INT PRIMARY KEY AUTO_INCREMENT,
       UserID INT,
@@ -458,8 +476,7 @@ async function initMysqlSchemaAndSeed() {
       TenantID INT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS ReminderRules (
       RuleID INT PRIMARY KEY AUTO_INCREMENT,
       CompanyID INT NOT NULL,
@@ -471,8 +488,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS EscalationRules (
       EscalationID INT PRIMARY KEY AUTO_INCREMENT,
       CompanyID INT NOT NULL,
@@ -485,8 +501,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Notifications (
       NotificationID INT PRIMARY KEY AUTO_INCREMENT,
       UserID INT NOT NULL,
@@ -500,8 +515,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskTemplates (
       TemplateID INT PRIMARY KEY AUTO_INCREMENT,
       CompanyID INT NOT NULL,
@@ -515,8 +529,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Tenants (
       TenantID INT PRIMARY KEY AUTO_INCREMENT,
       TenantCode VARCHAR(100) UNIQUE NOT NULL,
@@ -549,8 +562,7 @@ async function initMysqlSchemaAndSeed() {
       UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TenantRegistrations (
       RegistrationID INT PRIMARY KEY AUTO_INCREMENT,
       TenantID INT,
@@ -587,8 +599,7 @@ async function initMysqlSchemaAndSeed() {
       UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS ImportantDateCategories (
       CategoryID INT PRIMARY KEY AUTO_INCREMENT,
       CategoryName VARCHAR(500) NOT NULL,
@@ -599,8 +610,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS ImportantDateReminders (
       ReminderID INT PRIMARY KEY AUTO_INCREMENT,
       ImportantDateID INT NOT NULL,
@@ -611,8 +621,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS ImportantDateHistory (
       HistoryID INT PRIMARY KEY AUTO_INCREMENT,
       ImportantDateID INT NOT NULL,
@@ -623,8 +632,7 @@ async function initMysqlSchemaAndSeed() {
       ChangedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskCategories (
       CategoryID INT PRIMARY KEY AUTO_INCREMENT,
       CompanyID INT NOT NULL,
@@ -635,8 +643,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskChecklist (
       ChecklistID INT PRIMARY KEY AUTO_INCREMENT,
       TaskID INT NOT NULL,
@@ -648,8 +655,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskUpdates (
       UpdateID INT PRIMARY KEY AUTO_INCREMENT,
       TaskID INT NOT NULL,
@@ -659,8 +665,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskActivityLog (
       ActivityID INT PRIMARY KEY AUTO_INCREMENT,
       TaskID INT NOT NULL,
@@ -672,8 +677,7 @@ async function initMysqlSchemaAndSeed() {
       CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS RecurringTasks (
       RecurringTaskID INT PRIMARY KEY AUTO_INCREMENT,
       CompanyID INT NOT NULL,
@@ -700,8 +704,7 @@ async function initMysqlSchemaAndSeed() {
       UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS NotificationLog (
       LogID INT PRIMARY KEY AUTO_INCREMENT,
       NotificationID INT,
@@ -712,16 +715,13 @@ async function initMysqlSchemaAndSeed() {
       ErrorMessage LONGTEXT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
-
-  // Seed data if tables are empty
-  const [userRows] = await mysqlPool!.execute('SELECT COUNT(*) as cnt FROM Users');
-  const userCount = (userRows as any[])[0].cnt;
-
-  if (userCount === 0) {
-    console.log('[Database] Seeding MySQL database with demo data...');
-
-    // Roles
-    await runSql(`INSERT INTO Roles (RoleID, RoleName, Description, IsSystemRole) VALUES
+    // Seed data if tables are empty
+    const [userRows] = await mysqlPool.execute('SELECT COUNT(*) as cnt FROM Users');
+    const userCount = userRows[0].cnt;
+    if (userCount === 0) {
+        console.log('[Database] Seeding MySQL database with demo data...');
+        // Roles
+        await runSql(`INSERT INTO Roles (RoleID, RoleName, Description, IsSystemRole) VALUES
       (1, 'Super Admin', 'Full system access with all permissions', 1),
       (2, 'Finance Admin', 'Financial operations and reporting access', 1),
       (3, 'Management', 'Strategic oversight and approval authority', 1),
@@ -729,9 +729,8 @@ async function initMysqlSchemaAndSeed() {
       (5, 'Employee', 'Standard task execution and date management', 1),
       (6, 'Viewer', 'Read-only access across assigned modules', 1)
     `);
-
-    // Permissions
-    await runSql(`INSERT INTO Permissions (PermissionCode, PermissionName, Module, Description) VALUES
+        // Permissions
+        await runSql(`INSERT INTO Permissions (PermissionCode, PermissionName, Module, Description) VALUES
       ('TASK_VIEW', 'View Tasks', 'Tasks', 'View task list and details'),
       ('TASK_CREATE', 'Create Tasks', 'Tasks', 'Create new tasks'),
       ('TASK_EDIT', 'Edit Tasks', 'Tasks', 'Edit existing tasks'),
@@ -757,56 +756,52 @@ async function initMysqlSchemaAndSeed() {
       ('EMPLOYEE_MANAGE', 'Manage Employees', 'Admin', 'Manage employee records'),
       ('LOCATION_MANAGE', 'Manage Locations', 'Admin', 'Manage company locations')
     `);
-
-    // RolePermissions — Super Admin gets all
-    const [permRows] = await mysqlPool!.execute('SELECT PermissionID FROM Permissions');
-    for (const p of (permRows as any[])) {
-      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (1, ?)', [p.PermissionID]);
-    }
-    // Finance Admin
-    const financePerms = ['TASK_VIEW','TASK_CREATE','TASK_EDIT','DATE_VIEW','DATE_CREATE','DATE_EDIT','DATE_RENEW','REPORT_VIEW','REPORT_EXPORT','CALENDAR_VIEW'];
-    for (const code of financePerms) {
-      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 2, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
-    }
-    // Management
-    const mgmtPerms = ['TASK_VIEW','TASK_APPROVE','DATE_VIEW','DATE_CREATE','DATE_EDIT','DATE_RENEW','REPORT_VIEW','REPORT_EXPORT','AUDIT_VIEW','CALENDAR_VIEW'];
-    for (const code of mgmtPerms) {
-      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 3, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
-    }
-    // Manager
-    const mgrPerms = ['TASK_VIEW','TASK_CREATE','TASK_EDIT','TASK_APPROVE','TASK_ASSIGN','DATE_VIEW','DATE_CREATE','DATE_EDIT','DATE_RENEW','REPORT_VIEW','CALENDAR_VIEW'];
-    for (const code of mgrPerms) {
-      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 4, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
-    }
-    // Employee
-    const empPerms = ['TASK_VIEW','TASK_EDIT','DATE_VIEW','CALENDAR_VIEW'];
-    for (const code of empPerms) {
-      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 5, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
-    }
-    // Viewer
-    const viewerPerms = ['TASK_VIEW','DATE_VIEW','REPORT_VIEW','CALENDAR_VIEW'];
-    for (const code of viewerPerms) {
-      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 6, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
-    }
-
-    // Locations
-    await runSql(`INSERT INTO Locations (LocationID, CompanyID, LocationName, LocationCode, City, State, IsHeadOffice) VALUES
+        // RolePermissions — Super Admin gets all
+        const [permRows] = await mysqlPool.execute('SELECT PermissionID FROM Permissions');
+        for (const p of permRows) {
+            await mysqlPool.execute('INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (1, ?)', [p.PermissionID]);
+        }
+        // Finance Admin
+        const financePerms = ['TASK_VIEW', 'TASK_CREATE', 'TASK_EDIT', 'DATE_VIEW', 'DATE_CREATE', 'DATE_EDIT', 'DATE_RENEW', 'REPORT_VIEW', 'REPORT_EXPORT', 'CALENDAR_VIEW'];
+        for (const code of financePerms) {
+            await mysqlPool.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 2, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
+        }
+        // Management
+        const mgmtPerms = ['TASK_VIEW', 'TASK_APPROVE', 'DATE_VIEW', 'DATE_CREATE', 'DATE_EDIT', 'DATE_RENEW', 'REPORT_VIEW', 'REPORT_EXPORT', 'AUDIT_VIEW', 'CALENDAR_VIEW'];
+        for (const code of mgmtPerms) {
+            await mysqlPool.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 3, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
+        }
+        // Manager
+        const mgrPerms = ['TASK_VIEW', 'TASK_CREATE', 'TASK_EDIT', 'TASK_APPROVE', 'TASK_ASSIGN', 'DATE_VIEW', 'DATE_CREATE', 'DATE_EDIT', 'DATE_RENEW', 'REPORT_VIEW', 'CALENDAR_VIEW'];
+        for (const code of mgrPerms) {
+            await mysqlPool.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 4, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
+        }
+        // Employee
+        const empPerms = ['TASK_VIEW', 'TASK_EDIT', 'DATE_VIEW', 'CALENDAR_VIEW'];
+        for (const code of empPerms) {
+            await mysqlPool.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 5, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
+        }
+        // Viewer
+        const viewerPerms = ['TASK_VIEW', 'DATE_VIEW', 'REPORT_VIEW', 'CALENDAR_VIEW'];
+        for (const code of viewerPerms) {
+            await mysqlPool.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 6, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
+        }
+        // Locations
+        await runSql(`INSERT INTO Locations (LocationID, CompanyID, LocationName, LocationCode, City, State, IsHeadOffice) VALUES
       (1, 1, 'Head Office - Mumbai', 'HO-MUM', 'Mumbai', 'Maharashtra', 1),
       (2, 1, 'Tech Hub - Bangalore', 'TH-BLR', 'Bangalore', 'Karnataka', 0),
       (3, 1, 'Regional Office - Delhi', 'RO-DEL', 'New Delhi', 'Delhi', 0)
     `);
-
-    // Departments
-    await runSql(`INSERT INTO Departments (DepartmentID, CompanyID, DepartmentName, DepartmentCode, HOD_EmployeeID) VALUES
+        // Departments
+        await runSql(`INSERT INTO Departments (DepartmentID, CompanyID, DepartmentName, DepartmentCode, HOD_EmployeeID) VALUES
       (1, 1, 'Information Technology', 'IT', 1),
       (2, 1, 'Finance & Accounts', 'FIN', 5),
       (3, 1, 'Human Resources', 'HR', 7),
       (4, 1, 'Operations & Procurement', 'OPS', 8),
       (5, 1, 'Admin & Facilities', 'ADM', 6)
     `);
-
-    // Companies
-    await runSql(`INSERT INTO Companies (CompanyID, ParentCompanyID, CompanyCode, CompanyName, LegalName, CompanyType, City, State, TenantID) VALUES
+        // Companies
+        await runSql(`INSERT INTO Companies (CompanyID, ParentCompanyID, CompanyCode, CompanyName, LegalName, CompanyType, City, State, TenantID) VALUES
       (1, NULL, 'ABC-GRP', 'ABC Group Holdings Ltd', 'ABC Group Holdings Private Limited', 'Holding', 'Mumbai', 'Maharashtra', 1),
       (2, 1, 'ABC-TECH', 'ABC Technologies Pvt Ltd', 'ABC Technologies Private Limited', 'Subsidiary', 'Bangalore', 'Karnataka', 1),
       (3, 1, 'ABC-FIN', 'ABC Financial Services', 'ABC Financial Services Limited', 'Subsidiary', 'Mumbai', 'Maharashtra', 1),
@@ -817,9 +812,8 @@ async function initMysqlSchemaAndSeed() {
       (8, 2, 'ABC-CLOUD', 'ABC Cloud Services', 'ABC Cloud Infrastructure Pvt Ltd', 'Branch', 'Bangalore', 'Karnataka', 1),
       (9, 5, 'ABC-AUTO', 'ABC Auto Components', 'ABC Auto Components Manufacturing Ltd', 'Branch', 'Pune', 'Maharashtra', 1)
     `);
-
-    // Employees
-    await runSql(`INSERT INTO Employees (EmployeeID, CompanyID, EmployeeCode, FullName, DepartmentID, Designation, LocationID, Phone, Email, JoiningDate, DateOfBirth, AnniversaryDate, Status, TenantID) VALUES
+        // Employees
+        await runSql(`INSERT INTO Employees (EmployeeID, CompanyID, EmployeeCode, FullName, DepartmentID, Designation, LocationID, Phone, Email, JoiningDate, DateOfBirth, AnniversaryDate, Status, TenantID) VALUES
       (1, 1, 'EMP-001', 'Suresh Menon', 1, 'Chief Technology Officer', 1, '+91 98765 11001', 'suresh.menon@apexcorp.com', '2018-04-15', '1985-03-22', '2018-04-15', 'Active', 1),
       (2, 1, 'EMP-002', 'Priya Sharma', 2, 'Chief Financial Officer', 1, '+91 98765 11002', 'priya.sharma@apexcorp.com', '2019-06-01', '1983-08-14', '2019-06-01', 'Active', 1),
       (3, 1, 'EMP-003', 'Amit Patel', 1, 'Senior DevOps & Systems Lead', 2, '+91 98450 11003', 'amit.patel@apexcorp.com', '2020-01-10', '1988-10-05', '2020-01-10', 'Active', 1),
@@ -831,10 +825,9 @@ async function initMysqlSchemaAndSeed() {
       (9, 1, 'EMP-009', 'Ananya Sen', 3, 'Talent Acquisition Specialist', 2, '+91 98450 11009', 'ananya.sen@apexcorp.com', '2022-05-10', '1994-02-28', '2022-05-10', 'Active', 1),
       (10, 1, 'EMP-010', 'Karan Mehra', 5, 'Safety & Security Officer', 3, '+91 98110 11010', 'karan.mehra@apexcorp.com', '2022-09-01', '1993-06-17', '2022-09-01', 'Active', 1)
     `);
-
-    // Users — generate a real bcrypt hash for the demo password
-    const pwdHash = bcrypt.hashSync('Password@123', 10);
-    await mysqlPool!.execute(`INSERT INTO Users (UserID, CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status, TenantID) VALUES
+        // Users — generate a real bcrypt hash for the demo password
+        const pwdHash = bcryptjs_1.default.hashSync('Password@123', 10);
+        await mysqlPool.execute(`INSERT INTO Users (UserID, CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status, TenantID) VALUES
       (1, 1, 1, 'admin@company.com', 'admin@company.com', ?, 1, 'Active', 1),
       (2, 1, 2, 'finance.admin@company.com', 'finance.admin@company.com', ?, 2, 'Active', 1),
       (3, 1, 1, 'management@company.com', 'management@company.com', ?, 3, 'Active', 1),
@@ -846,9 +839,8 @@ async function initMysqlSchemaAndSeed() {
       (9, 1, 8, 'manager.purchase@company.com', 'manager.purchase@company.com', ?, 4, 'Active', 1),
       (10, 1, NULL, 'viewer@company.com', 'viewer@company.com', ?, 6, 'Active', 1)
     `, [pwdHash, pwdHash, pwdHash, pwdHash, pwdHash, pwdHash, pwdHash, pwdHash, pwdHash, pwdHash]);
-
-    // UserCompany mappings
-    await runSql(`INSERT INTO UserCompany (UserID, CompanyID, RoleID, IsPrimary, AccessScope) VALUES
+        // UserCompany mappings
+        await runSql(`INSERT INTO UserCompany (UserID, CompanyID, RoleID, IsPrimary, AccessScope) VALUES
       (1, 1, 1, 1, 'All'), (1, 2, 1, 0, 'All'), (1, 3, 1, 0, 'All'),
       (2, 1, 2, 1, 'Department'), (3, 1, 3, 1, 'All'),
       (4, 1, 4, 1, 'Department'), (4, 2, 4, 0, 'Department'),
@@ -856,9 +848,8 @@ async function initMysqlSchemaAndSeed() {
       (8, 1, 4, 1, 'Department'), (9, 1, 4, 1, 'Department'),
       (10, 1, 6, 1, 'All')
     `);
-
-    // DateCategories
-    await runSql(`INSERT INTO DateCategories (CategoryName, ColorCode, Icon, IsSystem) VALUES
+        // DateCategories
+        await runSql(`INSERT INTO DateCategories (CategoryName, ColorCode, Icon, IsSystem) VALUES
       ('Employee Birthday', '#ec4899', 'Cake', 1),
       ('Employee Work Anniversary', '#f59e0b', 'Award', 1),
       ('Company Anniversary', '#8b5cf6', 'PartyPopper', 1),
@@ -875,50 +866,46 @@ async function initMysqlSchemaAndSeed() {
       ('Audit Schedule', '#f43f5e', 'ClipboardCheck', 1),
       ('Compliance Due Date', '#0ea5e9', 'Scale', 1)
     `);
-
-    // Default tenant
-    await runSql(`INSERT INTO Tenants (TenantID, TenantCode, TenantName, LegalName, ContactPerson, ContactEmail, Industry, City, State, Country, SubscriptionTier, MaxCompanies, MaxUsers, LicenseStartDate, LicenseEndDate, EnabledModules, Status) VALUES
+        // Default tenant
+        await runSql(`INSERT INTO Tenants (TenantID, TenantCode, TenantName, LegalName, ContactPerson, ContactEmail, Industry, City, State, Country, SubscriptionTier, MaxCompanies, MaxUsers, LicenseStartDate, LicenseEndDate, EnabledModules, Status) VALUES
       (1, 'DEFAULT', 'Default Organization', 'Default Organization Pvt Ltd', 'System Admin', 'admin@company.com', 'Technology', 'Mumbai', 'Maharashtra', 'India', 'Enterprise', 100, 1000, '2025-01-01', '2030-12-31', '["tasks","dates","calendar","reports","audit"]', 'Active')
     `);
-
-    // Platform Admin role
-    await runSql(`INSERT INTO Roles (RoleName, Description, IsSystemRole, IsPlatformRole) VALUES ('Platform Admin', 'Full platform access across all tenants and companies', 1, 1)`);
-
-    // Grant all permissions to Platform Admin
-    const [platRole] = await mysqlPool!.execute("SELECT RoleID FROM Roles WHERE RoleName = 'Platform Admin' LIMIT 1");
-    const platformRoleId = (platRole as any[])[0]?.RoleID || 7;
-    const [allPerms] = await mysqlPool!.execute('SELECT PermissionID FROM Permissions');
-    for (const p of (allPerms as any[])) {
-      try {
-        await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (?, ?)', [platformRoleId, p.PermissionID]);
-      } catch {}
+        // Platform Admin role
+        await runSql(`INSERT INTO Roles (RoleName, Description, IsSystemRole, IsPlatformRole) VALUES ('Platform Admin', 'Full platform access across all tenants and companies', 1, 1)`);
+        // Grant all permissions to Platform Admin
+        const [platRole] = await mysqlPool.execute("SELECT RoleID FROM Roles WHERE RoleName = 'Platform Admin' LIMIT 1");
+        const platformRoleId = platRole[0]?.RoleID || 7;
+        const [allPerms] = await mysqlPool.execute('SELECT PermissionID FROM Permissions');
+        for (const p of allPerms) {
+            try {
+                await mysqlPool.execute('INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (?, ?)', [platformRoleId, p.PermissionID]);
+            }
+            catch { }
+        }
+        // Platform super admin user
+        const platformPassword = process.env.PLATFORM_ADMIN_PASSWORD || 'PlatformAdmin@2026!';
+        const platformPwdHash = bcryptjs_1.default.hashSync(platformPassword, 12);
+        await mysqlPool.execute(`INSERT INTO Users (CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status, TenantID, IsPlatformAdmin, MustChangePassword) VALUES (1, NULL, 'sverpadmin', 'platform@erp-system.com', ?, ?, 'Active', NULL, 1, 1)`, [platformPwdHash, platformRoleId]);
+        console.log('[Database] MySQL seed completed successfully.');
     }
-
-    // Platform super admin user
-    const platformPassword = process.env.PLATFORM_ADMIN_PASSWORD || 'PlatformAdmin@2026!';
-    const platformPwdHash = bcrypt.hashSync(platformPassword, 12);
-    await mysqlPool!.execute(`INSERT INTO Users (CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status, TenantID, IsPlatformAdmin, MustChangePassword) VALUES (1, NULL, 'sverpadmin', 'platform@erp-system.com', ?, ?, 'Active', NULL, 1, 1)`, [platformPwdHash, platformRoleId]);
-
-    console.log('[Database] MySQL seed completed successfully.');
-  }
 }
-
 /**
  * Initializes SQLite tables & demo seeds matching SQL Server DDL
  */
 async function initSqliteSchemaAndSeed() {
-  if (!sqliteDb) return;
-
-  const runSql = (sqlText: string) => {
-    return new Promise<void>((resolve, reject) => {
-      sqliteDb!.run(sqlText, (err: any) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-  };
-
-  await runSql(`
+    if (!sqliteDb)
+        return;
+    const runSql = (sqlText) => {
+        return new Promise((resolve, reject) => {
+            sqliteDb.run(sqlText, (err) => {
+                if (err)
+                    reject(err);
+                else
+                    resolve();
+            });
+        });
+    };
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Companies (
       CompanyID INTEGER PRIMARY KEY AUTOINCREMENT,
       ParentCompanyID INTEGER,
@@ -952,8 +939,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS UserCompany (
       UserCompanyID INTEGER PRIMARY KEY AUTOINCREMENT,
       UserID INTEGER NOT NULL,
@@ -967,8 +953,7 @@ async function initSqliteSchemaAndSeed() {
       UNIQUE(UserID, CompanyID)
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Locations (
       LocationID INTEGER PRIMARY KEY AUTOINCREMENT,
       CompanyID INTEGER NOT NULL,
@@ -986,8 +971,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Departments (
       DepartmentID INTEGER PRIMARY KEY AUTOINCREMENT,
       CompanyID INTEGER NOT NULL,
@@ -1000,8 +984,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Roles (
       RoleID INTEGER PRIMARY KEY AUTOINCREMENT,
       RoleName TEXT NOT NULL UNIQUE,
@@ -1011,8 +994,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Permissions (
       PermissionID INTEGER PRIMARY KEY AUTOINCREMENT,
       PermissionCode TEXT NOT NULL UNIQUE,
@@ -1020,16 +1002,14 @@ async function initSqliteSchemaAndSeed() {
       Description TEXT
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS RolePermissions (
       RoleID INTEGER NOT NULL,
       PermissionID INTEGER NOT NULL,
       PRIMARY KEY (RoleID, PermissionID)
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Employees (
       EmployeeID INTEGER PRIMARY KEY AUTOINCREMENT,
       CompanyID INTEGER NOT NULL,
@@ -1051,8 +1031,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Users (
       UserID INTEGER PRIMARY KEY AUTOINCREMENT,
       CompanyID INTEGER NOT NULL,
@@ -1070,8 +1049,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS ImportantDateCategories (
       CategoryID INTEGER PRIMARY KEY AUTOINCREMENT,
       CompanyID INTEGER,
@@ -1083,8 +1061,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS ImportantDates (
       ImportantDateID INTEGER PRIMARY KEY AUTOINCREMENT,
       CompanyID INTEGER NOT NULL,
@@ -1117,8 +1094,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS ImportantDateReminders (
       ReminderID INTEGER PRIMARY KEY AUTOINCREMENT,
       ImportantDateID INTEGER NOT NULL,
@@ -1129,8 +1105,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS ImportantDateHistory (
       HistoryID INTEGER PRIMARY KEY AUTOINCREMENT,
       ImportantDateID INTEGER NOT NULL,
@@ -1143,8 +1118,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskCategories (
       CategoryID INTEGER PRIMARY KEY AUTOINCREMENT,
       CompanyID INTEGER,
@@ -1155,8 +1129,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Tasks (
       TaskID INTEGER PRIMARY KEY AUTOINCREMENT,
       TaskNumber TEXT NOT NULL UNIQUE,
@@ -1190,8 +1163,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskAssignees (
       TaskID INTEGER NOT NULL,
       EmployeeID INTEGER NOT NULL,
@@ -1199,8 +1171,7 @@ async function initSqliteSchemaAndSeed() {
       PRIMARY KEY (TaskID, EmployeeID)
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskChecklist (
       ChecklistItemID INTEGER PRIMARY KEY AUTOINCREMENT,
       TaskID INTEGER NOT NULL,
@@ -1212,8 +1183,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskUpdates (
       UpdateID INTEGER PRIMARY KEY AUTOINCREMENT,
       TaskID INTEGER NOT NULL,
@@ -1227,8 +1197,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskComments (
       CommentID INTEGER PRIMARY KEY AUTOINCREMENT,
       TaskID INTEGER NOT NULL,
@@ -1239,8 +1208,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskAttachments (
       AttachmentID INTEGER PRIMARY KEY AUTOINCREMENT,
       TaskID INTEGER,
@@ -1255,8 +1223,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskActivityLog (
       ActivityID INTEGER PRIMARY KEY AUTOINCREMENT,
       TaskID INTEGER NOT NULL,
@@ -1269,8 +1236,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TaskTemplates (
       TemplateID INTEGER PRIMARY KEY AUTOINCREMENT,
       CompanyID INTEGER NOT NULL,
@@ -1285,8 +1251,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS RecurringTasks (
       RecurringTaskID INTEGER PRIMARY KEY AUTOINCREMENT,
       CompanyID INTEGER NOT NULL,
@@ -1313,8 +1278,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS ReminderRules (
       RuleID INTEGER PRIMARY KEY AUTOINCREMENT,
       CompanyID INTEGER NOT NULL,
@@ -1326,8 +1290,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS EscalationRules (
       EscalationID INTEGER PRIMARY KEY AUTOINCREMENT,
       CompanyID INTEGER NOT NULL,
@@ -1338,8 +1301,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Notifications (
       NotificationID INTEGER PRIMARY KEY AUTOINCREMENT,
       UserID INTEGER NOT NULL,
@@ -1353,8 +1315,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS NotificationLog (
       LogID INTEGER PRIMARY KEY AUTOINCREMENT,
       IdempotencyKey TEXT NOT NULL UNIQUE,
@@ -1365,8 +1326,7 @@ async function initSqliteSchemaAndSeed() {
       Status TEXT DEFAULT 'Sent'
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS AuditLogs (
       AuditID INTEGER PRIMARY KEY AUTOINCREMENT,
       UserID INTEGER,
@@ -1381,8 +1341,7 @@ async function initSqliteSchemaAndSeed() {
       CreatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS Tenants (
       TenantID INTEGER PRIMARY KEY AUTOINCREMENT,
       TenantCode TEXT UNIQUE NOT NULL,
@@ -1415,8 +1374,7 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  await runSql(`
+    await runSql(`
     CREATE TABLE IF NOT EXISTS TenantRegistrations (
       RegistrationID INTEGER PRIMARY KEY AUTOINCREMENT,
       TenantID INTEGER,
@@ -1453,42 +1411,38 @@ async function initSqliteSchemaAndSeed() {
       UpdatedAt TEXT DEFAULT (datetime('now'))
     );
   `);
-
-  // Run column migrations for SQLite
-  const tryAddCol = async (table: string, colDef: string) => {
-    try {
-      await runSql(`ALTER TABLE ${table} ADD COLUMN ${colDef}`);
-    } catch {}
-  };
-  await tryAddCol('Companies', 'ParentCompanyID INTEGER');
-  await tryAddCol('Companies', 'CompanyCode TEXT');
-  await tryAddCol('Companies', 'LegalName TEXT');
-  await tryAddCol('Companies', 'CompanyType TEXT DEFAULT "Subsidiary"');
-  await tryAddCol('Companies', 'EnabledModules TEXT DEFAULT \'["tasks","dates","calendar","reports","audit"]\'');
-  await tryAddCol('Companies', 'SubscriptionTier TEXT DEFAULT "Enterprise"');
-  await tryAddCol('Companies', 'MaxUsers INTEGER DEFAULT 100');
-  await tryAddCol('AuditLogs', 'CompanyID INTEGER');
-
-  // Multi-tenant column migrations
-  await tryAddCol('Companies', 'TenantID INTEGER');
-  await tryAddCol('Users', 'TenantID INTEGER');
-  await tryAddCol('Users', 'IsPlatformAdmin INTEGER DEFAULT 0');
-  await tryAddCol('Users', 'MustChangePassword INTEGER DEFAULT 0');
-  await tryAddCol('Roles', 'TenantID INTEGER');
-  await tryAddCol('Roles', 'IsPlatformRole INTEGER DEFAULT 0');
-  await tryAddCol('Employees', 'TenantID INTEGER');
-  await tryAddCol('AuditLogs', 'TenantID INTEGER');
-
-  const checkUserComp = await new Promise<any[]>((res) => {
-    sqliteDb!.all(`SELECT * FROM UserCompany LIMIT 1`, (err: any, rows: any) => res(rows || []));
-  });
-
-  if (checkUserComp.length === 0) {
-    console.log('[Database] Seeding multi-tenant company hierarchy into SQLite...');
-
-    // Clean & Seed Multi-Company Hierarchy
-    await runSql(`DELETE FROM Companies;`);
-    await runSql(`
+    // Run column migrations for SQLite
+    const tryAddCol = async (table, colDef) => {
+        try {
+            await runSql(`ALTER TABLE ${table} ADD COLUMN ${colDef}`);
+        }
+        catch { }
+    };
+    await tryAddCol('Companies', 'ParentCompanyID INTEGER');
+    await tryAddCol('Companies', 'CompanyCode TEXT');
+    await tryAddCol('Companies', 'LegalName TEXT');
+    await tryAddCol('Companies', 'CompanyType TEXT DEFAULT "Subsidiary"');
+    await tryAddCol('Companies', 'EnabledModules TEXT DEFAULT \'["tasks","dates","calendar","reports","audit"]\'');
+    await tryAddCol('Companies', 'SubscriptionTier TEXT DEFAULT "Enterprise"');
+    await tryAddCol('Companies', 'MaxUsers INTEGER DEFAULT 100');
+    await tryAddCol('AuditLogs', 'CompanyID INTEGER');
+    // Multi-tenant column migrations
+    await tryAddCol('Companies', 'TenantID INTEGER');
+    await tryAddCol('Users', 'TenantID INTEGER');
+    await tryAddCol('Users', 'IsPlatformAdmin INTEGER DEFAULT 0');
+    await tryAddCol('Users', 'MustChangePassword INTEGER DEFAULT 0');
+    await tryAddCol('Roles', 'TenantID INTEGER');
+    await tryAddCol('Roles', 'IsPlatformRole INTEGER DEFAULT 0');
+    await tryAddCol('Employees', 'TenantID INTEGER');
+    await tryAddCol('AuditLogs', 'TenantID INTEGER');
+    const checkUserComp = await new Promise((res) => {
+        sqliteDb.all(`SELECT * FROM UserCompany LIMIT 1`, (err, rows) => res(rows || []));
+    });
+    if (checkUserComp.length === 0) {
+        console.log('[Database] Seeding multi-tenant company hierarchy into SQLite...');
+        // Clean & Seed Multi-Company Hierarchy
+        await runSql(`DELETE FROM Companies;`);
+        await runSql(`
       INSERT INTO Companies (CompanyID, ParentCompanyID, CompanyCode, CompanyName, LegalName, CompanyType, ShortName, City, State, Status, EnabledModules, SubscriptionTier, MaxUsers)
       VALUES 
       (1, NULL, 'ABC-GRP', 'ABC Group Holdings Ltd', 'ABC Group Holdings International Pvt Ltd', 'Holding', 'ABCGroup', 'Mumbai', 'Maharashtra', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Enterprise', 500),
@@ -1502,10 +1456,9 @@ async function initSqliteSchemaAndSeed() {
       (9, 8, 'ZEN-MUM', 'Zenith Cloud Tech Mumbai', 'Zenith Cloud Technologies Mumbai Ltd', 'Subsidiary', 'ZenithMUM', 'Mumbai', 'Maharashtra', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Professional', 100),
       (10, 8, 'ZEN-BLR', 'Zenith Cloud Tech Bengaluru', 'Zenith Cloud Technologies Bengaluru Ltd', 'Subsidiary', 'ZenithBLR', 'Bengaluru', 'Karnataka', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Professional', 100);
     `);
-
-    // Ensure Roles exist
-    await runSql(`DELETE FROM Roles;`);
-    await runSql(`
+        // Ensure Roles exist
+        await runSql(`DELETE FROM Roles;`);
+        await runSql(`
       INSERT INTO Roles (RoleID, RoleName, Description, IsSystemRole)
       VALUES 
       (1, 'Super Admin', 'Full SaaS enterprise platform access across all companies', 1),
@@ -1515,10 +1468,9 @@ async function initSqliteSchemaAndSeed() {
       (5, 'Employee', 'Updates assigned tasks, uploads remarks and checklists', 1),
       (6, 'Viewer', 'Read-only access to dashboards, tasks, and calendar', 1);
     `);
-
-    // Seed UserCompany mappings
-    await runSql(`DELETE FROM UserCompany;`);
-    await runSql(`
+        // Seed UserCompany mappings
+        await runSql(`DELETE FROM UserCompany;`);
+        await runSql(`
       INSERT INTO UserCompany (UserID, CompanyID, RoleID, AccessScope, IsPrimary, IsActive)
       VALUES
       (1, 1, 1, 'Global', 1, 1),
@@ -1541,31 +1493,28 @@ async function initSqliteSchemaAndSeed() {
       (9, 5, 4, 'Hierarchy', 1, 1),
       (10, 1, 6, 'Own', 1, 1);
     `);
-
-    await runSql(`DELETE FROM Locations;`);
-    await runSql(`DELETE FROM Departments;`);
-    await runSql(`DELETE FROM Employees;`);
-    await runSql(`DELETE FROM Users;`);
-    await runSql(`DELETE FROM ImportantDates;`);
-    await runSql(`DELETE FROM Tasks;`);
-    await runSql(`DELETE FROM TaskAssignees;`);
-    await runSql(`DELETE FROM TaskChecklist;`);
-    await runSql(`DELETE FROM TaskTemplates;`);
-    await runSql(`DELETE FROM ReminderRules;`);
-    await runSql(`DELETE FROM EscalationRules;`);
-    await runSql(`DELETE FROM ImportantDateCategories;`);
-    await runSql(`DELETE FROM TaskCategories;`);
-    await runSql(`DELETE FROM RolePermissions;`);
-
-    await runSql(`
+        await runSql(`DELETE FROM Locations;`);
+        await runSql(`DELETE FROM Departments;`);
+        await runSql(`DELETE FROM Employees;`);
+        await runSql(`DELETE FROM Users;`);
+        await runSql(`DELETE FROM ImportantDates;`);
+        await runSql(`DELETE FROM Tasks;`);
+        await runSql(`DELETE FROM TaskAssignees;`);
+        await runSql(`DELETE FROM TaskChecklist;`);
+        await runSql(`DELETE FROM TaskTemplates;`);
+        await runSql(`DELETE FROM ReminderRules;`);
+        await runSql(`DELETE FROM EscalationRules;`);
+        await runSql(`DELETE FROM ImportantDateCategories;`);
+        await runSql(`DELETE FROM TaskCategories;`);
+        await runSql(`DELETE FROM RolePermissions;`);
+        await runSql(`
       INSERT INTO Locations (LocationID, CompanyID, LocationCode, LocationName, Address, City, State, ContactPerson, Phone, Email, Status)
       VALUES 
       (1, 1, 'LOC-MUM', 'Headquarters - Mumbai', 'Cyber One, BKC', 'Mumbai', 'Maharashtra', 'Rajesh Sharma', '+91 98200 11223', 'mumbai@apexcorp.com', 'Active'),
       (2, 1, 'LOC-BLR', 'Tech Hub - Bangalore', 'Outer Ring Road, Bellandur', 'Bangalore', 'Karnataka', 'Vikram Rao', '+91 98450 22334', 'bangalore@apexcorp.com', 'Active'),
       (3, 1, 'LOC-DEL', 'Regional Office - Delhi', 'Connaught Place', 'New Delhi', 'Delhi', 'Ananya Gupta', '+91 98110 33445', 'delhi@apexcorp.com', 'Active');
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO Departments (DepartmentID, CompanyID, DepartmentCode, DepartmentName, Status)
       VALUES 
       (1, 1, 'DEPT-IT', 'Information Technology', 'Active'),
@@ -1574,8 +1523,7 @@ async function initSqliteSchemaAndSeed() {
       (4, 1, 'DEPT-PUR', 'Purchase & Procurement', 'Active'),
       (5, 1, 'DEPT-OPS', 'Operations & Maintenance', 'Active');
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO Roles (RoleID, RoleName, Description, IsSystemRole)
       VALUES 
       (1, 'Super Admin', 'Full enterprise system access with administrative rights', 1),
@@ -1585,8 +1533,7 @@ async function initSqliteSchemaAndSeed() {
       (5, 'Employee', 'Updates assigned tasks, uploads remarks and checklists', 1),
       (6, 'Viewer', 'Read-only access to dashboards, tasks, and calendar', 1);
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO Permissions (PermissionID, PermissionCode, ModuleName, Description)
       VALUES
       (1, 'tasks.view', 'Tasks', 'View tasks list and details'),
@@ -1609,25 +1556,23 @@ async function initSqliteSchemaAndSeed() {
       (18, 'audit.view', 'Audit', 'View system audit history'),
       (19, 'settings.manage', 'Settings', 'Manage system rules and integrations');
     `);
-
-    for (let p = 1; p <= 19; p++) {
-      await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (1, ${p}), (2, ${p});`);
-    }
-    for (const p of [1, 2, 3, 5, 6, 7, 9, 10, 11, 12, 16, 17]) {
-      await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (4, ${p});`);
-    }
-    for (const p of [1, 5, 7, 9, 16, 17]) {
-      await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (3, ${p});`);
-    }
-    for (const p of [1, 6, 9]) {
-      await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (5, ${p});`);
-    }
-    for (const p of [1, 9, 16]) {
-      await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (6, ${p});`);
-    }
-
-    // 10 Employees
-    await runSql(`
+        for (let p = 1; p <= 19; p++) {
+            await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (1, ${p}), (2, ${p});`);
+        }
+        for (const p of [1, 2, 3, 5, 6, 7, 9, 10, 11, 12, 16, 17]) {
+            await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (4, ${p});`);
+        }
+        for (const p of [1, 5, 7, 9, 16, 17]) {
+            await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (3, ${p});`);
+        }
+        for (const p of [1, 6, 9]) {
+            await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (5, ${p});`);
+        }
+        for (const p of [1, 9, 16]) {
+            await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (6, ${p});`);
+        }
+        // 10 Employees
+        await runSql(`
       INSERT INTO Employees (EmployeeID, CompanyID, EmployeeCode, EmployeeName, DepartmentID, Designation, LocationID, Mobile, Email, JoiningDate, Birthday, WorkAnniversary, Status)
       VALUES
       (1, 1, 'EMP-001', 'Suresh Menon', 1, 'Director & Head of IT', 1, '+91 98201 11001', 'suresh.menon@apexcorp.com', '2018-04-15', '1982-08-30', '2018-04-15', 'Active'),
@@ -1641,10 +1586,9 @@ async function initSqliteSchemaAndSeed() {
       (9, 1, 'EMP-009', 'Ananya Sen', 3, 'Talent Acquisition Specialist', 2, '+91 98450 11009', 'ananya.sen@apexcorp.com', '2022-05-10', '1994-02-28', '2022-05-10', 'Active'),
       (10, 1, 'EMP-010', 'Karan Mehra', 5, 'Safety & Security Officer', 3, '+91 98110 11010', 'karan.mehra@apexcorp.com', '2022-09-01', '1993-06-17', '2022-09-01', 'Active');
     `);
-
-    // Users — generate a real bcrypt hash for the demo password
-    const pwdHash = bcrypt.hashSync('Password@123', 10);
-    await runSql(`
+        // Users — generate a real bcrypt hash for the demo password
+        const pwdHash = bcryptjs_1.default.hashSync('Password@123', 10);
+        await runSql(`
       INSERT INTO Users (UserID, CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status)
       VALUES
       (1, 1, 1, 'admin@company.com', 'admin@company.com', '${pwdHash}', 1, 'Active'),
@@ -1658,37 +1602,34 @@ async function initSqliteSchemaAndSeed() {
       (9, 1, 8, 'manager.purchase@company.com', 'manager.purchase@company.com', '${pwdHash}', 4, 'Active'),
       (10, 1, NULL, 'viewer@company.com', 'viewer@company.com', '${pwdHash}', 6, 'Active');
     `);
-
-    const dateCats = [
-      ['Employee Birthday', '#ec4899', 'Cake'],
-      ['Employee Work Anniversary', '#f59e0b', 'Award'],
-      ['Company Anniversary', '#8b5cf6', 'PartyPopper'],
-      ['Contract Expiry', '#ef4444', 'FileText'],
-      ['AMC Expiry', '#3b82f6', 'Wrench'],
-      ['Warranty Expiry', '#06b6d4', 'ShieldAlert'],
-      ['Insurance Expiry', '#10b981', 'ShieldCheck'],
-      ['License Renewal', '#6366f1', 'FileCheck'],
-      ['Registration Renewal', '#84cc16', 'BookmarkCheck'],
-      ['Agreement Expiry', '#f97316', 'FileSignature'],
-      ['Lease Expiry', '#a855f7', 'Building2'],
-      ['Payment Due Date', '#e11d48', 'CreditCard'],
-      ['Vendor Follow-up', '#0284c7', 'PhoneCall'],
-      ['Customer Follow-up', '#059669', 'Users'],
-      ['Compliance Date', '#dc2626', 'Scale'],
-      ['Tax Date', '#d97706', 'Receipt'],
-      ['Audit Date', '#7c3aed', 'ClipboardCheck'],
-      ['Maintenance Date', '#475569', 'Hammer'],
-      ['Subscription Renewal', '#2563eb', 'RefreshCw'],
-      ['Domain Renewal', '#0891b2', 'Globe'],
-      ['Software License Renewal', '#4f46e5', 'Key'],
-      ['Custom Event', '#64748b', 'Tag'],
-    ];
-
-    for (const [name, color, icon] of dateCats) {
-      await runSql(`INSERT INTO ImportantDateCategories (CompanyID, CategoryName, ColorCode, IconName, IsSystemDefault, Status) VALUES (1, '${name}', '${color}', '${icon}', 1, 'Active')`);
-    }
-
-    await runSql(`
+        const dateCats = [
+            ['Employee Birthday', '#ec4899', 'Cake'],
+            ['Employee Work Anniversary', '#f59e0b', 'Award'],
+            ['Company Anniversary', '#8b5cf6', 'PartyPopper'],
+            ['Contract Expiry', '#ef4444', 'FileText'],
+            ['AMC Expiry', '#3b82f6', 'Wrench'],
+            ['Warranty Expiry', '#06b6d4', 'ShieldAlert'],
+            ['Insurance Expiry', '#10b981', 'ShieldCheck'],
+            ['License Renewal', '#6366f1', 'FileCheck'],
+            ['Registration Renewal', '#84cc16', 'BookmarkCheck'],
+            ['Agreement Expiry', '#f97316', 'FileSignature'],
+            ['Lease Expiry', '#a855f7', 'Building2'],
+            ['Payment Due Date', '#e11d48', 'CreditCard'],
+            ['Vendor Follow-up', '#0284c7', 'PhoneCall'],
+            ['Customer Follow-up', '#059669', 'Users'],
+            ['Compliance Date', '#dc2626', 'Scale'],
+            ['Tax Date', '#d97706', 'Receipt'],
+            ['Audit Date', '#7c3aed', 'ClipboardCheck'],
+            ['Maintenance Date', '#475569', 'Hammer'],
+            ['Subscription Renewal', '#2563eb', 'RefreshCw'],
+            ['Domain Renewal', '#0891b2', 'Globe'],
+            ['Software License Renewal', '#4f46e5', 'Key'],
+            ['Custom Event', '#64748b', 'Tag'],
+        ];
+        for (const [name, color, icon] of dateCats) {
+            await runSql(`INSERT INTO ImportantDateCategories (CompanyID, CategoryName, ColorCode, IconName, IsSystemDefault, Status) VALUES (1, '${name}', '${color}', '${icon}', 1, 'Active')`);
+        }
+        await runSql(`
       INSERT INTO TaskCategories (CategoryID, CompanyID, CategoryName, ColorCode, RequiresApproval, Status)
       VALUES 
       (1, 1, 'Infrastructure & Maintenance', '#3b82f6', 1, 'Active'),
@@ -1698,8 +1639,7 @@ async function initSqliteSchemaAndSeed() {
       (5, 1, 'Vendor & Procurement', '#8b5cf6', 1, 'Active'),
       (6, 1, 'Daily Operations', '#64748b', 0, 'Active');
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO ImportantDates (ImportantDateID, CompanyID, LocationID, DepartmentID, CategoryID, Title, Description, RelatedVendor, ReferenceNumber, Date, StartDate, ExpiryDate, RecurrenceType, ResponsibleEmployeeID, Priority, AutoGenerateTask, LeadDaysForTask, TaskAssignedToID, Status, CreatedBy)
       VALUES
       (1, 1, 1, 5, 5, 'CCTV & Security Surveillance AMC Renewal', 'Annual maintenance contract for 128 IP Cameras and Central NVR system at Mumbai HQ.', 'SecureTech Solutions India', 'AMC-SEC-2025-99', '2026-09-08', '2025-09-08', '2026-09-08', 'Yearly', 6, 'Critical', 1, 15, 6, 'Active', 1),
@@ -1711,8 +1651,7 @@ async function initSqliteSchemaAndSeed() {
       (7, 1, 1, 1, 21, 'Microsoft 365 Enterprise E5 Licenses', '150 Seats Microsoft 365 E5 subscription renewal through CSP partner.', 'Redington India Ltd', 'MSFT-CSP-7712', '2026-10-15', '2025-10-15', '2026-10-15', 'Yearly', 3, 'Medium', 1, 30, 3, 'Active', 1),
       (8, 1, 1, 5, 15, 'Maharashtra Fire Safety NOC Renewal', 'Annual fire department inspection, hydrant test certificate, and NOC renewal.', 'Fire Dept Mumbai Suburbs', 'NOC-FIRE-2025-41', '2026-09-01', '2025-09-01', '2026-09-01', 'Yearly', 6, 'Critical', 1, 15, 6, 'Active', 1);
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO Tasks (TaskID, TaskNumber, CompanyID, LocationID, DepartmentID, CategoryID, TaskTitle, TaskDescription, AssignedByID, ManagerID, StartDate, DueDate, Priority, Status, PercentageComplete, EstimatedHours, ActualHours, CompletedDate)
       VALUES
       (1, 'TSK-2026-0001', 1, 1, 1, 1, 'Disaster Recovery & Offsite Database Backup Verification', 'Perform quarterly test restoration of SQL Server production backups into staging isolated cluster.', 1, 3, '2026-08-25', '2026-08-31', 'Critical', 'Overdue', 60, 8.0, 5.5, NULL),
@@ -1731,14 +1670,12 @@ async function initSqliteSchemaAndSeed() {
       (14, 'TSK-2026-0014', 1, 1, 1, 6, 'Review End-user Antivirus & Patch Compliance Report', 'Verify Crowdstrike Falcon EDR sensor health across 240 employee laptops.', 1, 4, '2026-09-02', '2026-09-05', 'Medium', 'In Progress', 60, 5.0, 3.0, NULL),
       (15, 'TSK-2026-0015', 1, 1, 4, 5, 'Stationery & Office Consumables Bi-Monthly Order', 'Consolidate department requests and issue PO to approved supplier.', 1, 8, '2026-09-01', '2026-09-07', 'Low', 'Pending', 0, 4.0, 0.0, NULL);
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO TaskAssignees (TaskID, EmployeeID)
       VALUES 
       (1, 4), (1, 3), (2, 3), (3, 6), (4, 5), (5, 7), (6, 5), (7, 4), (8, 8), (9, 6), (10, 3), (11, 7), (12, 5), (13, 6), (14, 4), (15, 8);
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO TaskChecklist (TaskID, Title, IsCompleted, SortOrder)
       VALUES 
       (1, 'Verify latest differential backup file integrity in AWS S3 Glacier', 1, 1),
@@ -1751,25 +1688,21 @@ async function initSqliteSchemaAndSeed() {
       (2, 'Upload signed PEM certificates to Cloudflare SSL management', 1, 3),
       (2, 'Run SSL Labs Qualys scanner to ensure A+ rating and HSTS validity', 0, 4);
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO TaskUpdates (TaskID, EmployeeID, PreviousStatus, NewStatus, PreviousProgress, NewProgress, TimeSpentHours, Remarks)
       VALUES (1, 4, 'In Progress', 'In Progress', 30, 60, 3.5, 'Successfully restored the 450GB DB snapshot into the staging cluster. Running DBCC CHECKDB currently.');
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO TaskComments (TaskID, UserID, CommentText)
       VALUES (1, 1, 'Please ensure this is completed before the ISO audit on the 25th. Excellent progress.');
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO TaskTemplates (TemplateID, CompanyID, DepartmentID, CategoryID, TemplateName, Description, EstimatedHours, Priority, ChecklistJSON)
       VALUES 
       (1, 1, 1, 1, 'Monthly IT Infrastructure Checklist', 'Standard recurring monthly health check for all core servers, firewalls, backups, and security endpoints.', 6.0, 'High', '["Verify Active Directory replication status","Run antivirus health audit on all endpoints","Check SAN storage space thresholds","Test offsite backup restore in sandbox","Review firewall drop logs for anomalies","Verify UPS battery self-test log"]'),
       (2, 1, 2, 3, 'Monthly Financial Closing Checklist', 'End of month financial reconciliation and compliance checklist.', 12.0, 'High', '["Reconcile all operational bank statements","Verify vendor payment vouchers and GST input invoices","Calculate employee TDS deductions","Generate monthly P&L and Balance Sheet draft","Archive petty cash expense receipts"]');
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO ReminderRules (RuleID, CompanyID, RuleName, TargetType, DaysOffset, Channel, IsActive)
       VALUES
       (1, 1, '30 Days Advance Notice', 'ImportantDate', -30, 'In-App', 1),
@@ -1779,8 +1712,7 @@ async function initSqliteSchemaAndSeed() {
       (5, 1, '1 Day Final Warning', 'Both', -1, 'In-App', 1),
       (6, 1, 'On Due Date Alert', 'Both', 0, 'In-App', 1);
     `);
-
-    await runSql(`
+        await runSql(`
       INSERT INTO EscalationRules (EscalationID, CompanyID, DaysOverdue, EscalateToRole, Channel, IsActive)
       VALUES
       (1, 1, 1, 'Employee', 'In-App', 1),
@@ -1788,447 +1720,417 @@ async function initSqliteSchemaAndSeed() {
       (3, 1, 5, 'Management', 'In-App', 1),
       (4, 1, 10, 'Super Admin', 'In-App', 1);
     `);
-
-    console.log('[Database] Seed completed successfully.');
-  }
-
-  // Multi-tenant migration: seed default tenant and platform admin if not yet present
-  const tenantCheck = await new Promise<any[]>((res) => {
-    sqliteDb!.all(`SELECT TenantID FROM Tenants LIMIT 1`, (err: any, rows: any) => res(rows || []));
-  });
-
-  if (tenantCheck.length === 0) {
-    console.log('[Database] Seeding multi-tenant platform data...');
-
-    // 1. Create default tenant for all existing data
-    await runSql(`
+        console.log('[Database] Seed completed successfully.');
+    }
+    // Multi-tenant migration: seed default tenant and platform admin if not yet present
+    const tenantCheck = await new Promise((res) => {
+        sqliteDb.all(`SELECT TenantID FROM Tenants LIMIT 1`, (err, rows) => res(rows || []));
+    });
+    if (tenantCheck.length === 0) {
+        console.log('[Database] Seeding multi-tenant platform data...');
+        // 1. Create default tenant for all existing data
+        await runSql(`
       INSERT INTO Tenants (TenantID, TenantCode, TenantName, LegalName, ContactPerson, ContactEmail, Industry, City, State, Country, SubscriptionTier, MaxCompanies, MaxUsers, LicenseStartDate, LicenseEndDate, EnabledModules, Status)
       VALUES (1, 'DEFAULT', 'Default Organization', 'Default Organization Pvt Ltd', 'System Admin', 'admin@company.com', 'Technology', 'Mumbai', 'Maharashtra', 'India', 'Enterprise', 100, 1000, '2025-01-01', '2030-12-31', '["tasks","dates","calendar","reports","audit"]', 'Active')
     `);
-
-    // 2. Backfill TenantID = 1 on all existing records
-    await runSql(`UPDATE Companies SET TenantID = 1 WHERE TenantID IS NULL`);
-    await runSql(`UPDATE Users SET TenantID = 1 WHERE TenantID IS NULL`);
-    await runSql(`UPDATE Employees SET TenantID = 1 WHERE TenantID IS NULL`);
-    await runSql(`UPDATE AuditLogs SET TenantID = 1 WHERE TenantID IS NULL`);
-
-    // 3. Add "Platform Admin" role if not exists
-    const platformRoleCheck = await new Promise<any[]>((res) => {
-      sqliteDb!.all(`SELECT RoleID FROM Roles WHERE RoleName = 'Platform Admin' LIMIT 1`, (err: any, rows: any) => res(rows || []));
-    });
-    if (platformRoleCheck.length === 0) {
-      await runSql(`INSERT INTO Roles (RoleName, Description, IsSystemRole, IsPlatformRole) VALUES ('Platform Admin', 'Full platform access across all tenants and companies', 1, 1)`);
-    }
-
-    // 4. Get the Platform Admin role ID
-    const platformRole = await new Promise<any[]>((res) => {
-      sqliteDb!.all(`SELECT RoleID FROM Roles WHERE RoleName = 'Platform Admin' LIMIT 1`, (err: any, rows: any) => res(rows || []));
-    });
-    const platformRoleId = platformRole.length > 0 ? platformRole[0].RoleID : 7;
-
-    // 5. Grant all permissions to Platform Admin role
-    const allPerms = await new Promise<any[]>((res) => {
-      sqliteDb!.all(`SELECT PermissionID FROM Permissions`, (err: any, rows: any) => res(rows || []));
-    });
-    for (const perm of allPerms) {
-      try {
-        await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (${platformRoleId}, ${perm.PermissionID})`);
-      } catch {}
-    }
-
-    // 6. Create Platform Super Admin user (sverpadmin) if not exists
-    const platformUserCheck = await new Promise<any[]>((res) => {
-      sqliteDb!.all(`SELECT UserID FROM Users WHERE Username = 'sverpadmin' LIMIT 1`, (err: any, rows: any) => res(rows || []));
-    });
-    if (platformUserCheck.length === 0) {
-      const platformPassword = process.env.PLATFORM_ADMIN_PASSWORD || 'PlatformAdmin@2026!';
-      const salt = bcrypt.genSaltSync(12);
-      const platformPwdHash = bcrypt.hashSync(platformPassword, salt);
-      await runSql(`
+        // 2. Backfill TenantID = 1 on all existing records
+        await runSql(`UPDATE Companies SET TenantID = 1 WHERE TenantID IS NULL`);
+        await runSql(`UPDATE Users SET TenantID = 1 WHERE TenantID IS NULL`);
+        await runSql(`UPDATE Employees SET TenantID = 1 WHERE TenantID IS NULL`);
+        await runSql(`UPDATE AuditLogs SET TenantID = 1 WHERE TenantID IS NULL`);
+        // 3. Add "Platform Admin" role if not exists
+        const platformRoleCheck = await new Promise((res) => {
+            sqliteDb.all(`SELECT RoleID FROM Roles WHERE RoleName = 'Platform Admin' LIMIT 1`, (err, rows) => res(rows || []));
+        });
+        if (platformRoleCheck.length === 0) {
+            await runSql(`INSERT INTO Roles (RoleName, Description, IsSystemRole, IsPlatformRole) VALUES ('Platform Admin', 'Full platform access across all tenants and companies', 1, 1)`);
+        }
+        // 4. Get the Platform Admin role ID
+        const platformRole = await new Promise((res) => {
+            sqliteDb.all(`SELECT RoleID FROM Roles WHERE RoleName = 'Platform Admin' LIMIT 1`, (err, rows) => res(rows || []));
+        });
+        const platformRoleId = platformRole.length > 0 ? platformRole[0].RoleID : 7;
+        // 5. Grant all permissions to Platform Admin role
+        const allPerms = await new Promise((res) => {
+            sqliteDb.all(`SELECT PermissionID FROM Permissions`, (err, rows) => res(rows || []));
+        });
+        for (const perm of allPerms) {
+            try {
+                await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (${platformRoleId}, ${perm.PermissionID})`);
+            }
+            catch { }
+        }
+        // 6. Create Platform Super Admin user (sverpadmin) if not exists
+        const platformUserCheck = await new Promise((res) => {
+            sqliteDb.all(`SELECT UserID FROM Users WHERE Username = 'sverpadmin' LIMIT 1`, (err, rows) => res(rows || []));
+        });
+        if (platformUserCheck.length === 0) {
+            const platformPassword = process.env.PLATFORM_ADMIN_PASSWORD || 'PlatformAdmin@2026!';
+            const salt = bcryptjs_1.default.genSaltSync(12);
+            const platformPwdHash = bcryptjs_1.default.hashSync(platformPassword, salt);
+            await runSql(`
         INSERT INTO Users (CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status, TenantID, IsPlatformAdmin, MustChangePassword)
         VALUES (1, NULL, 'sverpadmin', 'platform@erp-system.com', '${platformPwdHash}', ${platformRoleId}, 'Active', NULL, 1, 1)
       `);
-      console.log('[Database] Platform Super Admin (sverpadmin) created. Password sourced from PLATFORM_ADMIN_PASSWORD env var.');
+            console.log('[Database] Platform Super Admin (sverpadmin) created. Password sourced from PLATFORM_ADMIN_PASSWORD env var.');
+        }
+        console.log('[Database] Multi-tenant platform data seeded successfully.');
     }
-
-    console.log('[Database] Multi-tenant platform data seeded successfully.');
-  }
-
-  // Fix demo account password hashes: replace the old placeholder hash with a real bcrypt hash
-  const oldFakeHash = '$2a$10$PjJbv9V0q5o1yv6d3mC44.yN7eU/rZ5L1vJqfQvV9B1o0W0s1p1r.';
-  const usersWithFakeHash = await new Promise<any[]>((res) => {
-    sqliteDb!.all(`SELECT UserID FROM Users WHERE PasswordHash = ?`, [oldFakeHash], (err: any, rows: any) => res(rows || []));
-  });
-  if (usersWithFakeHash.length > 0) {
-    const realHash = bcrypt.hashSync('Password@123', 10);
-    await new Promise<void>((resolve, reject) => {
-      sqliteDb!.run(`UPDATE Users SET PasswordHash = ? WHERE PasswordHash = ?`, [realHash, oldFakeHash], (err: any) => {
-        if (err) reject(err); else resolve();
-      });
+    // Fix demo account password hashes: replace the old placeholder hash with a real bcrypt hash
+    const oldFakeHash = '$2a$10$PjJbv9V0q5o1yv6d3mC44.yN7eU/rZ5L1vJqfQvV9B1o0W0s1p1r.';
+    const usersWithFakeHash = await new Promise((res) => {
+        sqliteDb.all(`SELECT UserID FROM Users WHERE PasswordHash = ?`, [oldFakeHash], (err, rows) => res(rows || []));
     });
-    console.log(`[Database] Fixed ${usersWithFakeHash.length} user(s) with invalid password hashes.`);
-  }
+    if (usersWithFakeHash.length > 0) {
+        const realHash = bcryptjs_1.default.hashSync('Password@123', 10);
+        await new Promise((resolve, reject) => {
+            sqliteDb.run(`UPDATE Users SET PasswordHash = ? WHERE PasswordHash = ?`, [realHash, oldFakeHash], (err) => {
+                if (err)
+                    reject(err);
+                else
+                    resolve();
+            });
+        });
+        console.log(`[Database] Fixed ${usersWithFakeHash.length} user(s) with invalid password hashes.`);
+    }
 }
-
 /**
  * Robust replacement for DATEDIFF(day, arg1, arg2)
  */
-function replaceDateDiff(sql: string): string {
-  let result = '';
-  let i = 0;
-  while (i < sql.length) {
-    const diffIdx = sql.toUpperCase().indexOf('DATEDIFF(DAY,', i);
-    if (diffIdx === -1) {
-      result += sql.substring(i);
-      break;
+function replaceDateDiff(sql) {
+    let result = '';
+    let i = 0;
+    while (i < sql.length) {
+        const diffIdx = sql.toUpperCase().indexOf('DATEDIFF(DAY,', i);
+        if (diffIdx === -1) {
+            result += sql.substring(i);
+            break;
+        }
+        result += sql.substring(i, diffIdx);
+        // Find matching parenthesis
+        let startArg = diffIdx + 'DATEDIFF(DAY,'.length;
+        let depth = 1;
+        let currentArg = '';
+        const args = [];
+        let j = startArg;
+        while (j < sql.length && depth > 0) {
+            const char = sql[j];
+            if (char === '(')
+                depth++;
+            else if (char === ')')
+                depth--;
+            if ((char === ',' && depth === 1) || (char === ')' && depth === 0)) {
+                args.push(currentArg.trim());
+                currentArg = '';
+            }
+            else {
+                currentArg += char;
+            }
+            j++;
+        }
+        if (args.length >= 2) {
+            const arg1 = args[0];
+            const arg2 = args[1];
+            result += `(CAST(round(julianday(${arg2}) - julianday(${arg1})) AS INTEGER))`;
+        }
+        else {
+            result += sql.substring(diffIdx, j);
+        }
+        i = j;
     }
-    result += sql.substring(i, diffIdx);
-    // Find matching parenthesis
-    let startArg = diffIdx + 'DATEDIFF(DAY,'.length;
-    let depth = 1;
-    let currentArg = '';
-    const args: string[] = [];
-    let j = startArg;
-    while (j < sql.length && depth > 0) {
-      const char = sql[j];
-      if (char === '(') depth++;
-      else if (char === ')') depth--;
-
-      if ((char === ',' && depth === 1) || (char === ')' && depth === 0)) {
-        args.push(currentArg.trim());
-        currentArg = '';
-      } else {
-        currentArg += char;
-      }
-      j++;
-    }
-
-    if (args.length >= 2) {
-      const arg1 = args[0];
-      const arg2 = args[1];
-      result += `(CAST(round(julianday(${arg2}) - julianday(${arg1})) AS INTEGER))`;
-    } else {
-      result += sql.substring(diffIdx, j);
-    }
-    i = j;
-  }
-  return result;
+    return result;
 }
-
 /**
  * Translates SQL Server T-SQL dialect to MySQL/MariaDB
  */
-function translateQueryForMysql(queryText: string, params: Record<string, any>): { sql: string; values: any[] } {
-  let q = queryText;
-
-  // Remove dbo. prefix
-  q = q.replace(/dbo\./g, '');
-
-  // Handle TOP N queries: SELECT TOP 10 ... -> SELECT ... LIMIT 10
-  let limitFromTop: number | null = null;
-  q = q.replace(/SELECT\s+TOP\s+(\d+)/i, (match, count) => {
-    limitFromTop = parseInt(count, 10);
-    return 'SELECT';
-  });
-
-  // Clean N-prefixed strings
-  q = q.replace(/N'([^']*)'/g, "'$1'");
-
-  // Date functions
-  q = q.replace(/CAST\(GETDATE\(\) AS DATE\)/gi, 'CURDATE()');
-  q = q.replace(/GETDATE\(\)/gi, 'NOW()');
-  q = q.replace(/SYSUTCDATETIME\(\)/gi, 'UTC_TIMESTAMP()');
-
-  // ISNULL → IFNULL
-  q = q.replace(/ISNULL\(/gi, 'IFNULL(');
-
-  // DATEDIFF(day, a, b) → DATEDIFF(b, a) — MySQL DATEDIFF returns days, args reversed
-  q = replaceDateDiffMysql(q);
-
-  // DATEADD(day, N, date) → DATE_ADD(date, INTERVAL N DAY)
-  q = q.replace(/DATEADD\(day,\s*([^,]+),\s*([^)]+)\)/gi, (match, interval, dateExpr) => {
-    return `DATE_ADD(${dateExpr.trim()}, INTERVAL ${interval.trim()} DAY)`;
-  });
-
-  // CAST(x AS DATE)
-  q = q.replace(/CAST\(([^)]+)\s+AS\s+DATE\)/gi, 'DATE($1)');
-  q = q.replace(/CAST\(([^)]+)\s+AS\s+DECIMAL\(([^)]+)\)\)/gi, 'CAST($1 AS DECIMAL($2))');
-
-  // STRING_AGG → GROUP_CONCAT
-  q = q.replace(/STRING_AGG\(([^,]+),\s*'([^']+)'\)/gi, "GROUP_CONCAT($1 SEPARATOR '$2')");
-
-  // OUTPUT INSERTED.* — not supported in MySQL, remove
-  q = q.replace(/OUTPUT INSERTED\.(\w+)/gi, '');
-
-  // Pagination: OFFSET @offset ROWS FETCH NEXT @limitNum ROWS ONLY → LIMIT @limitNum OFFSET @offset
-  const offsetMatch = q.match(/OFFSET\s+@offset\s+ROWS\s+FETCH\s+NEXT\s+@limitNum\s+ROWS\s+ONLY/i);
-  if (offsetMatch) {
-    q = q.replace(offsetMatch[0], 'LIMIT @limitNum OFFSET @offset');
-  } else if (limitFromTop !== null && !q.toUpperCase().includes('LIMIT')) {
-    q += ` LIMIT ${limitFromTop}`;
-  }
-
-  // Extract named parameters → positional ?
-  const paramValues: any[] = [];
-  const paramMatches = q.match(/@(\w+)/g);
-  if (paramMatches) {
-    for (const match of paramMatches) {
-      const paramName = match.substring(1);
-      if (params.hasOwnProperty(paramName)) {
-        paramValues.push(params[paramName]);
-      } else {
-        paramValues.push(null);
-      }
+function translateQueryForMysql(queryText, params) {
+    let q = queryText;
+    // Remove dbo. prefix
+    q = q.replace(/dbo\./g, '');
+    // Handle TOP N queries: SELECT TOP 10 ... -> SELECT ... LIMIT 10
+    let limitFromTop = null;
+    q = q.replace(/SELECT\s+TOP\s+(\d+)/i, (match, count) => {
+        limitFromTop = parseInt(count, 10);
+        return 'SELECT';
+    });
+    // Clean N-prefixed strings
+    q = q.replace(/N'([^']*)'/g, "'$1'");
+    // Date functions
+    q = q.replace(/CAST\(GETDATE\(\) AS DATE\)/gi, 'CURDATE()');
+    q = q.replace(/GETDATE\(\)/gi, 'NOW()');
+    q = q.replace(/SYSUTCDATETIME\(\)/gi, 'UTC_TIMESTAMP()');
+    // ISNULL → IFNULL
+    q = q.replace(/ISNULL\(/gi, 'IFNULL(');
+    // DATEDIFF(day, a, b) → DATEDIFF(b, a) — MySQL DATEDIFF returns days, args reversed
+    q = replaceDateDiffMysql(q);
+    // DATEADD(day, N, date) → DATE_ADD(date, INTERVAL N DAY)
+    q = q.replace(/DATEADD\(day,\s*([^,]+),\s*([^)]+)\)/gi, (match, interval, dateExpr) => {
+        return `DATE_ADD(${dateExpr.trim()}, INTERVAL ${interval.trim()} DAY)`;
+    });
+    // CAST(x AS DATE)
+    q = q.replace(/CAST\(([^)]+)\s+AS\s+DATE\)/gi, 'DATE($1)');
+    q = q.replace(/CAST\(([^)]+)\s+AS\s+DECIMAL\(([^)]+)\)\)/gi, 'CAST($1 AS DECIMAL($2))');
+    // STRING_AGG → GROUP_CONCAT
+    q = q.replace(/STRING_AGG\(([^,]+),\s*'([^']+)'\)/gi, "GROUP_CONCAT($1 SEPARATOR '$2')");
+    // OUTPUT INSERTED.* — not supported in MySQL, remove
+    q = q.replace(/OUTPUT INSERTED\.(\w+)/gi, '');
+    // Pagination: OFFSET @offset ROWS FETCH NEXT @limitNum ROWS ONLY → LIMIT @limitNum OFFSET @offset
+    const offsetMatch = q.match(/OFFSET\s+@offset\s+ROWS\s+FETCH\s+NEXT\s+@limitNum\s+ROWS\s+ONLY/i);
+    if (offsetMatch) {
+        q = q.replace(offsetMatch[0], 'LIMIT @limitNum OFFSET @offset');
     }
-  }
-
-  q = q.replace(/@\w+/g, '?');
-
-  return { sql: q, values: paramValues };
+    else if (limitFromTop !== null && !q.toUpperCase().includes('LIMIT')) {
+        q += ` LIMIT ${limitFromTop}`;
+    }
+    // Extract named parameters → positional ?
+    const paramValues = [];
+    const paramMatches = q.match(/@(\w+)/g);
+    if (paramMatches) {
+        for (const match of paramMatches) {
+            const paramName = match.substring(1);
+            if (params.hasOwnProperty(paramName)) {
+                paramValues.push(params[paramName]);
+            }
+            else {
+                paramValues.push(null);
+            }
+        }
+    }
+    q = q.replace(/@\w+/g, '?');
+    return { sql: q, values: paramValues };
 }
-
-function replaceDateDiffMysql(sqlStr: string): string {
-  let result = '';
-  let i = 0;
-  while (i < sqlStr.length) {
-    const diffIdx = sqlStr.toUpperCase().indexOf('DATEDIFF(DAY,', i);
-    if (diffIdx === -1) {
-      result += sqlStr.substring(i);
-      break;
+function replaceDateDiffMysql(sqlStr) {
+    let result = '';
+    let i = 0;
+    while (i < sqlStr.length) {
+        const diffIdx = sqlStr.toUpperCase().indexOf('DATEDIFF(DAY,', i);
+        if (diffIdx === -1) {
+            result += sqlStr.substring(i);
+            break;
+        }
+        result += sqlStr.substring(i, diffIdx);
+        let startArg = diffIdx + 'DATEDIFF(DAY,'.length;
+        let depth = 1;
+        let currentArg = '';
+        const args = [];
+        let j = startArg;
+        while (j < sqlStr.length && depth > 0) {
+            const char = sqlStr[j];
+            if (char === '(')
+                depth++;
+            else if (char === ')')
+                depth--;
+            if ((char === ',' && depth === 1) || (char === ')' && depth === 0)) {
+                args.push(currentArg.trim());
+                currentArg = '';
+            }
+            else {
+                currentArg += char;
+            }
+            j++;
+        }
+        if (args.length >= 2) {
+            // MySQL DATEDIFF(end, start) — opposite of T-SQL DATEDIFF(day, start, end)
+            result += `DATEDIFF(${args[1]}, ${args[0]})`;
+        }
+        else {
+            result += sqlStr.substring(diffIdx, j);
+        }
+        i = j;
     }
-    result += sqlStr.substring(i, diffIdx);
-    let startArg = diffIdx + 'DATEDIFF(DAY,'.length;
-    let depth = 1;
-    let currentArg = '';
-    const args: string[] = [];
-    let j = startArg;
-    while (j < sqlStr.length && depth > 0) {
-      const char = sqlStr[j];
-      if (char === '(') depth++;
-      else if (char === ')') depth--;
-      if ((char === ',' && depth === 1) || (char === ')' && depth === 0)) {
-        args.push(currentArg.trim());
-        currentArg = '';
-      } else {
-        currentArg += char;
-      }
-      j++;
-    }
-    if (args.length >= 2) {
-      // MySQL DATEDIFF(end, start) — opposite of T-SQL DATEDIFF(day, start, end)
-      result += `DATEDIFF(${args[1]}, ${args[0]})`;
-    } else {
-      result += sqlStr.substring(diffIdx, j);
-    }
-    i = j;
-  }
-  return result;
+    return result;
 }
-
 /**
  * Translates SQL Server T-SQL dialect to ANSI/SQLite when in SQLite mode
  */
-function translateQueryForSqlite(queryText: string, params: Record<string, any>): { sql: string; values: any[] } {
-  let q = queryText;
-
-  // 1. Remove dbo. prefix
-  q = q.replace(/dbo\./g, '');
-
-  // 2. Handle TOP N queries: SELECT TOP 10 ... -> SELECT ... LIMIT 10
-  let limitFromTop: number | null = null;
-  q = q.replace(/SELECT\s+TOP\s+(\d+)/i, (match, count) => {
-    limitFromTop = parseInt(count, 10);
-    return 'SELECT';
-  });
-
-  // 3. Clean built-ins & Unicode literals
-  q = q.replace(/N'([^']*)'/g, "'$1'");
-  q = q.replace(/CAST\(GETDATE\(\) AS DATE\)/gi, `date('now')`);
-  q = q.replace(/GETDATE\(\)/gi, `date('now')`);
-  q = q.replace(/SYSUTCDATETIME\(\)/gi, `datetime('now')`);
-  q = q.replace(/ISNULL\(/gi, `COALESCE(`);
-
-  // 4. Parse DATEDIFF(day, a, b)
-  q = replaceDateDiff(q);
-
-  // Handle DATEADD(day, N, date)
-  q = q.replace(/DATEADD\(day,\s*([^,]+),\s*([^)]+)\)/gi, (match, p1, p2) => {
-    return `date(${p2.trim()}, '+' || ${p1.trim()} || ' days')`;
-  });
-
-  // Clean remaining CAST(... AS DATE) or DECIMAL
-  q = q.replace(/CAST\(([^)]+)\s+AS\s+DATE\)/gi, `date($1)`);
-  q = q.replace(/CAST\(([^)]+)\s+AS\s+DECIMAL\([^)]+\)\)/gi, `ROUND($1, 1)`);
-
-  // Group Concat & Output
-  q = q.replace(/STRING_AGG\(([^,]+),\s*'([^']+)'\)/gi, `GROUP_CONCAT($1, '$2')`);
-  q = q.replace(/OUTPUT INSERTED\.(\w+)/gi, ``);
-
-  // Pagination syntax: OFFSET @offset ROWS FETCH NEXT @limitNum ROWS ONLY -> LIMIT @limitNum OFFSET @offset
-  const offsetMatch = q.match(/OFFSET\s+@offset\s+ROWS\s+FETCH\s+NEXT\s+@limitNum\s+ROWS\s+ONLY/i);
-  if (offsetMatch) {
-    q = q.replace(offsetMatch[0], `LIMIT @limitNum OFFSET @offset`);
-  } else if (limitFromTop !== null && !q.toUpperCase().includes('LIMIT')) {
-    q += ` LIMIT ${limitFromTop}`;
-  }
-
-  // Extract named parameters into positional ?
-  const paramValues: any[] = [];
-  const paramMatches = q.match(/@(\w+)/g);
-  if (paramMatches) {
-    for (const match of paramMatches) {
-      const paramName = match.substring(1);
-      if (params.hasOwnProperty(paramName)) {
-        paramValues.push(params[paramName]);
-      } else {
-        paramValues.push(null);
-      }
+function translateQueryForSqlite(queryText, params) {
+    let q = queryText;
+    // 1. Remove dbo. prefix
+    q = q.replace(/dbo\./g, '');
+    // 2. Handle TOP N queries: SELECT TOP 10 ... -> SELECT ... LIMIT 10
+    let limitFromTop = null;
+    q = q.replace(/SELECT\s+TOP\s+(\d+)/i, (match, count) => {
+        limitFromTop = parseInt(count, 10);
+        return 'SELECT';
+    });
+    // 3. Clean built-ins & Unicode literals
+    q = q.replace(/N'([^']*)'/g, "'$1'");
+    q = q.replace(/CAST\(GETDATE\(\) AS DATE\)/gi, `date('now')`);
+    q = q.replace(/GETDATE\(\)/gi, `date('now')`);
+    q = q.replace(/SYSUTCDATETIME\(\)/gi, `datetime('now')`);
+    q = q.replace(/ISNULL\(/gi, `COALESCE(`);
+    // 4. Parse DATEDIFF(day, a, b)
+    q = replaceDateDiff(q);
+    // Handle DATEADD(day, N, date)
+    q = q.replace(/DATEADD\(day,\s*([^,]+),\s*([^)]+)\)/gi, (match, p1, p2) => {
+        return `date(${p2.trim()}, '+' || ${p1.trim()} || ' days')`;
+    });
+    // Clean remaining CAST(... AS DATE) or DECIMAL
+    q = q.replace(/CAST\(([^)]+)\s+AS\s+DATE\)/gi, `date($1)`);
+    q = q.replace(/CAST\(([^)]+)\s+AS\s+DECIMAL\([^)]+\)\)/gi, `ROUND($1, 1)`);
+    // Group Concat & Output
+    q = q.replace(/STRING_AGG\(([^,]+),\s*'([^']+)'\)/gi, `GROUP_CONCAT($1, '$2')`);
+    q = q.replace(/OUTPUT INSERTED\.(\w+)/gi, ``);
+    // Pagination syntax: OFFSET @offset ROWS FETCH NEXT @limitNum ROWS ONLY -> LIMIT @limitNum OFFSET @offset
+    const offsetMatch = q.match(/OFFSET\s+@offset\s+ROWS\s+FETCH\s+NEXT\s+@limitNum\s+ROWS\s+ONLY/i);
+    if (offsetMatch) {
+        q = q.replace(offsetMatch[0], `LIMIT @limitNum OFFSET @offset`);
     }
-  }
-
-  q = q.replace(/@\w+/g, '?');
-
-  return { sql: q, values: paramValues };
+    else if (limitFromTop !== null && !q.toUpperCase().includes('LIMIT')) {
+        q += ` LIMIT ${limitFromTop}`;
+    }
+    // Extract named parameters into positional ?
+    const paramValues = [];
+    const paramMatches = q.match(/@(\w+)/g);
+    if (paramMatches) {
+        for (const match of paramMatches) {
+            const paramName = match.substring(1);
+            if (params.hasOwnProperty(paramName)) {
+                paramValues.push(params[paramName]);
+            }
+            else {
+                paramValues.push(null);
+            }
+        }
+    }
+    q = q.replace(/@\w+/g, '?');
+    return { sql: q, values: paramValues };
 }
-
 /**
  * Universal Query Execution (Supports both SQL Server and SQLite)
  */
-export async function executeQuery<T = any>(
-  queryText: string,
-  params: Record<string, any> = {}
-): Promise<{ recordset: T[]; rowsAffected: number[] }> {
-  await getDbPool();
-
-  if (activeEngine === 'mysql' && mysqlPool) {
-    const { sql: translatedSql, values } = translateQueryForMysql(queryText, params);
-    const isSelect = translatedSql.trim().toUpperCase().startsWith('SELECT');
-
-    try {
-      const [result, fields] = await mysqlPool.execute(translatedSql, values);
-      if (isSelect) {
-        const rows = (result as any[]).map((row: any) => {
-          const newRow: any = { ...row };
-          for (const key of Object.keys(newRow)) {
-            if (
-              (key.endsWith('Date') || key.endsWith('At')) &&
-              newRow[key] instanceof Date
-            ) {
-              // Keep as Date object for consistency
+async function executeQuery(queryText, params = {}) {
+    await getDbPool();
+    if (activeEngine === 'mysql' && mysqlPool) {
+        const { sql: translatedSql, values } = translateQueryForMysql(queryText, params);
+        const isSelect = translatedSql.trim().toUpperCase().startsWith('SELECT');
+        try {
+            const [result, fields] = await mysqlPool.execute(translatedSql, values);
+            if (isSelect) {
+                const rows = result.map((row) => {
+                    const newRow = { ...row };
+                    for (const key of Object.keys(newRow)) {
+                        if ((key.endsWith('Date') || key.endsWith('At')) &&
+                            newRow[key] instanceof Date) {
+                            // Keep as Date object for consistency
+                        }
+                    }
+                    return newRow;
+                });
+                return { recordset: rows, rowsAffected: [rows.length] };
             }
-          }
-          return newRow;
-        });
-        return { recordset: rows as T[], rowsAffected: [rows.length] };
-      } else {
-        const info = result as any;
-        const recordset: any[] = [];
-        if (info.insertId) {
-          recordset.push({
-            CompanyID: info.insertId,
-            UserCompanyID: info.insertId,
-            TaskID: info.insertId,
-            ImportantDateID: info.insertId,
-            EmployeeID: info.insertId,
-            UserID: info.insertId,
-            LocationID: info.insertId,
-            DepartmentID: info.insertId,
-            CategoryID: info.insertId,
-            TemplateID: info.insertId,
-            CommentID: info.insertId,
-            AttachmentID: info.insertId,
-            ActivityID: info.insertId,
-            TenantID: info.insertId,
-            RegistrationID: info.insertId,
-          });
-        }
-        return { recordset: recordset as T[], rowsAffected: [info.affectedRows || 0] };
-      }
-    } catch (err: any) {
-      console.error('[MySQL Query Error]:', err.message, '\nSQL:', translatedSql);
-      throw err;
-    }
-  } else if (activeEngine === 'mssql' && mssqlPool && mssqlPool.connected) {
-    const request = mssqlPool.request();
-    for (const [key, value] of Object.entries(params)) {
-      if (value === undefined || value === null) {
-        request.input(key, sql!.NVarChar, null);
-      } else if (typeof value === 'number') {
-        if (Number.isInteger(value)) {
-          request.input(key, sql!.Int, value);
-        } else {
-          request.input(key, sql!.Decimal(10, 2), value);
-        }
-      } else if (typeof value === 'boolean') {
-        request.input(key, sql!.Bit, value ? 1 : 0);
-      } else if (value instanceof Date) {
-        request.input(key, sql!.DateTime2, value);
-      } else {
-        request.input(key, sql!.NVarChar, String(value));
-      }
-    }
-    const result = await request.query(queryText);
-    return { recordset: result.recordset as T[], rowsAffected: result.rowsAffected };
-  } else {
-    // Execute on SQLite
-    const { sql: translatedSql, values } = translateQueryForSqlite(queryText, params);
-
-    return new Promise((resolve, reject) => {
-      const isSelect = translatedSql.trim().toUpperCase().startsWith('SELECT');
-
-      if (isSelect) {
-        sqliteDb!.all(translatedSql, values, (err: any, rows: any) => {
-          if (err) {
-            console.error('[SQLite Query Error]:', err.message, '\nSQL:', translatedSql);
-            return reject(err);
-          }
-          const mappedRows = (rows || []).map((row: any) => {
-            const newRow: any = { ...row };
-            for (const key of Object.keys(newRow)) {
-              if (
-                (key.endsWith('Date') || key.endsWith('At')) &&
-                typeof newRow[key] === 'string' &&
-                newRow[key].match(/^\d{4}-\d{2}-\d{2}/)
-              ) {
-                newRow[key] = new Date(newRow[key]);
-              }
+            else {
+                const info = result;
+                const recordset = [];
+                if (info.insertId) {
+                    recordset.push({
+                        CompanyID: info.insertId,
+                        UserCompanyID: info.insertId,
+                        TaskID: info.insertId,
+                        ImportantDateID: info.insertId,
+                        EmployeeID: info.insertId,
+                        UserID: info.insertId,
+                        LocationID: info.insertId,
+                        DepartmentID: info.insertId,
+                        CategoryID: info.insertId,
+                        TemplateID: info.insertId,
+                        CommentID: info.insertId,
+                        AttachmentID: info.insertId,
+                        ActivityID: info.insertId,
+                        TenantID: info.insertId,
+                        RegistrationID: info.insertId,
+                    });
+                }
+                return { recordset: recordset, rowsAffected: [info.affectedRows || 0] };
             }
-            return newRow;
-          });
-          resolve({ recordset: mappedRows as T[], rowsAffected: [mappedRows.length] });
+        }
+        catch (err) {
+            console.error('[MySQL Query Error]:', err.message, '\nSQL:', translatedSql);
+            throw err;
+        }
+    }
+    else if (activeEngine === 'mssql' && mssqlPool && mssqlPool.connected) {
+        const request = mssqlPool.request();
+        for (const [key, value] of Object.entries(params)) {
+            if (value === undefined || value === null) {
+                request.input(key, sql.NVarChar, null);
+            }
+            else if (typeof value === 'number') {
+                if (Number.isInteger(value)) {
+                    request.input(key, sql.Int, value);
+                }
+                else {
+                    request.input(key, sql.Decimal(10, 2), value);
+                }
+            }
+            else if (typeof value === 'boolean') {
+                request.input(key, sql.Bit, value ? 1 : 0);
+            }
+            else if (value instanceof Date) {
+                request.input(key, sql.DateTime2, value);
+            }
+            else {
+                request.input(key, sql.NVarChar, String(value));
+            }
+        }
+        const result = await request.query(queryText);
+        return { recordset: result.recordset, rowsAffected: result.rowsAffected };
+    }
+    else {
+        // Execute on SQLite
+        const { sql: translatedSql, values } = translateQueryForSqlite(queryText, params);
+        return new Promise((resolve, reject) => {
+            const isSelect = translatedSql.trim().toUpperCase().startsWith('SELECT');
+            if (isSelect) {
+                sqliteDb.all(translatedSql, values, (err, rows) => {
+                    if (err) {
+                        console.error('[SQLite Query Error]:', err.message, '\nSQL:', translatedSql);
+                        return reject(err);
+                    }
+                    const mappedRows = (rows || []).map((row) => {
+                        const newRow = { ...row };
+                        for (const key of Object.keys(newRow)) {
+                            if ((key.endsWith('Date') || key.endsWith('At')) &&
+                                typeof newRow[key] === 'string' &&
+                                newRow[key].match(/^\d{4}-\d{2}-\d{2}/)) {
+                                newRow[key] = new Date(newRow[key]);
+                            }
+                        }
+                        return newRow;
+                    });
+                    resolve({ recordset: mappedRows, rowsAffected: [mappedRows.length] });
+                });
+            }
+            else {
+                sqliteDb.run(translatedSql, values, function (err) {
+                    if (err) {
+                        console.error('[SQLite Exec Error]:', err.message, '\nSQL:', translatedSql);
+                        return reject(err);
+                    }
+                    const recordset = [];
+                    if (this.lastID) {
+                        recordset.push({
+                            CompanyID: this.lastID,
+                            UserCompanyID: this.lastID,
+                            TaskID: this.lastID,
+                            ImportantDateID: this.lastID,
+                            EmployeeID: this.lastID,
+                            UserID: this.lastID,
+                            LocationID: this.lastID,
+                            DepartmentID: this.lastID,
+                            CategoryID: this.lastID,
+                            TemplateID: this.lastID,
+                            CommentID: this.lastID,
+                            AttachmentID: this.lastID,
+                            ActivityID: this.lastID,
+                            TenantID: this.lastID,
+                            RegistrationID: this.lastID,
+                        });
+                    }
+                    resolve({ recordset: recordset, rowsAffected: [this.changes] });
+                });
+            }
         });
-      } else {
-        sqliteDb!.run(translatedSql, values, function (this: any, err: Error | null) {
-          if (err) {
-            console.error('[SQLite Exec Error]:', err.message, '\nSQL:', translatedSql);
-            return reject(err);
-          }
-          const recordset: any[] = [];
-          if (this.lastID) {
-            recordset.push({
-              CompanyID: this.lastID,
-              UserCompanyID: this.lastID,
-              TaskID: this.lastID,
-              ImportantDateID: this.lastID,
-              EmployeeID: this.lastID,
-              UserID: this.lastID,
-              LocationID: this.lastID,
-              DepartmentID: this.lastID,
-              CategoryID: this.lastID,
-              TemplateID: this.lastID,
-              CommentID: this.lastID,
-              AttachmentID: this.lastID,
-              ActivityID: this.lastID,
-              TenantID: this.lastID,
-              RegistrationID: this.lastID,
-            });
-          }
-          resolve({ recordset: recordset as T[], rowsAffected: [this.changes] });
-        });
-      }
-    });
-  }
+    }
 }
-
-export { sql };
-export default { getDbPool, executeQuery, sql };
+exports.default = { getDbPool, executeQuery, sql };

@@ -4,6 +4,8 @@ node_modules/
 # Environment & secrets
 .env
 backend/.env
+backend/.env.production
+*.env.production
 
 # Database files
 *.db
@@ -17,9 +19,9 @@ backup/
 *_backup_*
 BACKUP_INFO.md
 
-# Build output
-frontend/dist/
-backend/dist/
+# Build output (included in repo for Hostinger deployment)
+# frontend/dist/
+# backend/dist/
 
 # Logs
 *.log

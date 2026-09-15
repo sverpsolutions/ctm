@@ -16,11 +16,13 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2",
-    "msnodesqlv8": "^5.3.0",
-    "mssql": "^11.0.1",
     "multer": "^1.4.5-lts.1",
     "mysql2": "^3.24.4",
-    "node-cron": "^3.0.3",
+    "node-cron": "^3.0.3"
+  },
+  "optionalDependencies": {
+    "msnodesqlv8": "^5.3.0",
+    "mssql": "^11.0.1",
     "sqlite3": "^6.0.1"
   },
   "devDependencies": {

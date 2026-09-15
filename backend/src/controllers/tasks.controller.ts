@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { executeQuery, sql } from '../config/db';
+import { executeQuery } from '../config/db';
 import { logAudit } from '../services/audit.service';
 import { sendNotification } from '../services/notification.service';
 
