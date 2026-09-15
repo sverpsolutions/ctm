@@ -1,5 +1,6 @@
 import sql from 'mssql';
 import sqlite3 from 'sqlite3';
+import mysql from 'mysql2/promise';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
@@ -26,7 +27,8 @@ const mssqlConfig: sql.config = {
 
 let mssqlPool: sql.ConnectionPool | null = null;
 let sqliteDb: sqlite3.Database | null = null;
-let activeEngine: 'mssql' | 'sqlite' | null = null;
+let mysqlPool: mysql.Pool | null = null;
+let activeEngine: 'mssql' | 'sqlite' | 'mysql' | null = null;
 let isInitializing = false;
 
 export async function getDbPool(): Promise<any> {
@@ -36,9 +38,21 @@ export async function getDbPool(): Promise<any> {
   if (activeEngine === 'sqlite' && sqliteDb) {
     return sqliteDb;
   }
+  if (activeEngine === 'mysql' && mysqlPool) {
+    return mysqlPool;
+  }
 
   if (activeEngine === null && !isInitializing) {
     isInitializing = true;
+
+    if (process.env.DB_ENGINE === 'mysql') {
+      console.log(`[Database] Initializing MySQL/MariaDB connection.`);
+      activeEngine = 'mysql';
+      const pool = await initMysql();
+      isInitializing = false;
+      return pool;
+    }
+
     if (process.env.DB_ENGINE === 'sqlite') {
       console.log(`[Database] Initializing Integrated Local Enterprise SQLite Engine (Instant Mode).`);
       activeEngine = 'sqlite';
@@ -66,6 +80,9 @@ export async function getDbPool(): Promise<any> {
 
   if (activeEngine === 'sqlite') {
     return initSqlite();
+  }
+  if (activeEngine === 'mysql') {
+    return mysqlPool;
   }
 
   return mssqlPool;
@@ -96,6 +113,642 @@ function initSqlite(): Promise<sqlite3.Database> {
       }
     });
   });
+}
+
+async function initMysql(): Promise<mysql.Pool> {
+  if (mysqlPool) return mysqlPool;
+
+  mysqlPool = mysql.createPool({
+    host: process.env.MYSQL_HOST || process.env.DB_SERVER || 'localhost',
+    port: parseInt(process.env.MYSQL_PORT || process.env.DB_PORT || '3306', 10),
+    user: process.env.MYSQL_USER || process.env.DB_USER || 'root',
+    password: process.env.MYSQL_PASSWORD || process.env.DB_PASSWORD || '',
+    database: process.env.MYSQL_DATABASE || process.env.DB_DATABASE || 'company_task_db',
+    waitForConnections: true,
+    connectionLimit: 10,
+    charset: 'utf8mb4',
+  });
+
+  const conn = await mysqlPool.getConnection();
+  console.log(`[Database] MySQL/MariaDB connected to ${process.env.MYSQL_HOST || process.env.DB_SERVER || 'localhost'}/${process.env.MYSQL_DATABASE || process.env.DB_DATABASE || 'company_task_db'}`);
+  conn.release();
+
+  await initMysqlSchemaAndSeed();
+  return mysqlPool;
+}
+
+async function initMysqlSchemaAndSeed() {
+  if (!mysqlPool) return;
+
+  const runSql = async (sqlText: string) => {
+    await mysqlPool!.execute(sqlText);
+  };
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Companies (
+      CompanyID INT PRIMARY KEY AUTO_INCREMENT,
+      ParentCompanyID INT,
+      CompanyCode VARCHAR(100) UNIQUE,
+      CompanyName VARCHAR(500) NOT NULL,
+      LegalName VARCHAR(500),
+      CompanyType VARCHAR(100) DEFAULT 'Subsidiary',
+      ShortName VARCHAR(100),
+      Address VARCHAR(500),
+      City VARCHAR(200),
+      State VARCHAR(200),
+      Country VARCHAR(200) DEFAULT 'India',
+      PINCode VARCHAR(20),
+      Phone VARCHAR(50),
+      Email VARCHAR(255),
+      Website VARCHAR(500),
+      GSTIN VARCHAR(50),
+      PAN VARCHAR(50),
+      Logo VARCHAR(500),
+      EnabledModules TEXT,
+      SubscriptionTier VARCHAR(100) DEFAULT 'Enterprise',
+      MaxUsers INT DEFAULT 100,
+      FinancialYear VARCHAR(20) DEFAULT '2026-2027',
+      TimeZone VARCHAR(100) DEFAULT 'Asia/Kolkata',
+      DefaultReminderSettings TEXT,
+      Status VARCHAR(50) DEFAULT 'Active',
+      IsDeleted TINYINT DEFAULT 0,
+      CreatedBy INT,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UpdatedBy INT,
+      UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      TenantID INT
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS UserCompany (
+      UserCompanyID INT PRIMARY KEY AUTO_INCREMENT,
+      UserID INT NOT NULL,
+      CompanyID INT NOT NULL,
+      RoleID INT NOT NULL,
+      AccessScope VARCHAR(50) DEFAULT 'Own',
+      IsPrimary TINYINT DEFAULT 0,
+      IsActive TINYINT DEFAULT 1,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Departments (
+      DepartmentID INT PRIMARY KEY AUTO_INCREMENT,
+      CompanyID INT NOT NULL,
+      DepartmentName VARCHAR(500) NOT NULL,
+      DepartmentCode VARCHAR(100),
+      HOD_EmployeeID INT,
+      Description TEXT,
+      Status VARCHAR(50) DEFAULT 'Active',
+      IsDeleted TINYINT DEFAULT 0,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Employees (
+      EmployeeID INT PRIMARY KEY AUTO_INCREMENT,
+      CompanyID INT NOT NULL,
+      EmployeeCode VARCHAR(100),
+      FullName VARCHAR(500) NOT NULL,
+      DepartmentID INT,
+      Designation VARCHAR(500),
+      LocationID INT DEFAULT 1,
+      Phone VARCHAR(50),
+      Email VARCHAR(255),
+      JoiningDate VARCHAR(20),
+      DateOfBirth VARCHAR(20),
+      AnniversaryDate VARCHAR(20),
+      Status VARCHAR(50) DEFAULT 'Active',
+      IsDeleted TINYINT DEFAULT 0,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      TenantID INT
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Roles (
+      RoleID INT PRIMARY KEY AUTO_INCREMENT,
+      RoleName VARCHAR(200) NOT NULL,
+      Description VARCHAR(500),
+      IsSystemRole TINYINT DEFAULT 0,
+      IsDeleted TINYINT DEFAULT 0,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      IsPlatformRole TINYINT DEFAULT 0,
+      TenantID INT
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Permissions (
+      PermissionID INT PRIMARY KEY AUTO_INCREMENT,
+      PermissionCode VARCHAR(200) UNIQUE NOT NULL,
+      PermissionName VARCHAR(500) NOT NULL,
+      Module VARCHAR(200),
+      Description VARCHAR(500)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS RolePermissions (
+      RolePermissionID INT PRIMARY KEY AUTO_INCREMENT,
+      RoleID INT NOT NULL,
+      PermissionID INT NOT NULL,
+      UNIQUE KEY uq_role_perm (RoleID, PermissionID)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Users (
+      UserID INT PRIMARY KEY AUTO_INCREMENT,
+      CompanyID INT,
+      EmployeeID INT,
+      Username VARCHAR(255) NOT NULL,
+      Email VARCHAR(255),
+      PasswordHash VARCHAR(500) NOT NULL,
+      RoleID INT,
+      Status VARCHAR(50) DEFAULT 'Active',
+      LastLoginAt DATETIME,
+      FailedLoginAttempts INT DEFAULT 0,
+      LockoutUntil DATETIME,
+      IsDeleted TINYINT DEFAULT 0,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      TenantID INT,
+      IsPlatformAdmin TINYINT DEFAULT 0,
+      MustChangePassword TINYINT DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Locations (
+      LocationID INT PRIMARY KEY AUTO_INCREMENT,
+      CompanyID INT NOT NULL,
+      LocationName VARCHAR(500) NOT NULL,
+      LocationCode VARCHAR(100),
+      Address VARCHAR(500),
+      City VARCHAR(200),
+      State VARCHAR(200),
+      Country VARCHAR(200) DEFAULT 'India',
+      PINCode VARCHAR(20),
+      IsHeadOffice TINYINT DEFAULT 0,
+      Status VARCHAR(50) DEFAULT 'Active',
+      IsDeleted TINYINT DEFAULT 0,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS DateCategories (
+      CategoryID INT PRIMARY KEY AUTO_INCREMENT,
+      CategoryName VARCHAR(500) NOT NULL,
+      ColorCode VARCHAR(20),
+      Icon VARCHAR(100),
+      IsSystem TINYINT DEFAULT 0,
+      IsDeleted TINYINT DEFAULT 0,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS ImportantDates (
+      ImportantDateID INT PRIMARY KEY AUTO_INCREMENT,
+      CompanyID INT NOT NULL,
+      CategoryID INT,
+      Title VARCHAR(500) NOT NULL,
+      Description TEXT,
+      EventDate VARCHAR(20) NOT NULL,
+      ExpiryDate VARCHAR(20),
+      ReminderDaysBefore INT DEFAULT 7,
+      IsRecurring TINYINT DEFAULT 0,
+      RecurrencePattern VARCHAR(100),
+      Priority VARCHAR(50) DEFAULT 'Medium',
+      LinkedEmployeeID INT,
+      LinkedDepartmentID INT,
+      RenewalStatus VARCHAR(50) DEFAULT 'Active',
+      LastRenewedDate VARCHAR(20),
+      LastRenewedBy INT,
+      RenewalRemarks TEXT,
+      AttachmentPath VARCHAR(500),
+      Status VARCHAR(50) DEFAULT 'Active',
+      IsDeleted TINYINT DEFAULT 0,
+      CreatedBy INT,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UpdatedBy INT,
+      UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Tasks (
+      TaskID INT PRIMARY KEY AUTO_INCREMENT,
+      CompanyID INT NOT NULL,
+      TaskNumber VARCHAR(100),
+      Title VARCHAR(500) NOT NULL,
+      TaskDescription TEXT,
+      Priority VARCHAR(50) DEFAULT 'Medium',
+      Status VARCHAR(50) DEFAULT 'Pending',
+      DueDate VARCHAR(20),
+      CompletionDate VARCHAR(20),
+      AssignedTo INT,
+      AssignedBy INT,
+      ApprovedBy INT,
+      ApprovedAt DATETIME,
+      DepartmentID INT,
+      LocationID INT,
+      EstimatedHours DECIMAL(10,2),
+      ActualHours DECIMAL(10,2),
+      CompletionPercentage INT DEFAULT 0,
+      IsDeleted TINYINT DEFAULT 0,
+      CreatedBy INT,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UpdatedBy INT,
+      UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskAssignees (
+      TaskAssigneeID INT PRIMARY KEY AUTO_INCREMENT,
+      TaskID INT NOT NULL,
+      EmployeeID INT NOT NULL,
+      AssignedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      Status VARCHAR(50) DEFAULT 'Active'
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskComments (
+      CommentID INT PRIMARY KEY AUTO_INCREMENT,
+      TaskID INT NOT NULL,
+      UserID INT NOT NULL,
+      CommentText TEXT NOT NULL,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskAttachments (
+      AttachmentID INT PRIMARY KEY AUTO_INCREMENT,
+      TaskID INT NOT NULL,
+      FileName VARCHAR(500) NOT NULL,
+      FilePath VARCHAR(500) NOT NULL,
+      FileSize INT,
+      UploadedBy INT NOT NULL,
+      UploadedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskActivities (
+      ActivityID INT PRIMARY KEY AUTO_INCREMENT,
+      TaskID INT NOT NULL,
+      UserID INT,
+      ActivityType VARCHAR(200) NOT NULL,
+      Description TEXT,
+      OldValue TEXT,
+      NewValue TEXT,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS AuditLogs (
+      AuditID INT PRIMARY KEY AUTO_INCREMENT,
+      UserID INT,
+      Username VARCHAR(500),
+      Action VARCHAR(500) NOT NULL,
+      EntityName VARCHAR(500) NOT NULL,
+      EntityID INT,
+      OldValues LONGTEXT,
+      NewValues LONGTEXT,
+      IPAddress VARCHAR(100),
+      UserAgent TEXT,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      CompanyID INT,
+      TenantID INT
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS ReminderRules (
+      RuleID INT PRIMARY KEY AUTO_INCREMENT,
+      CompanyID INT NOT NULL,
+      RuleName VARCHAR(500) NOT NULL,
+      CategoryID INT,
+      DaysBefore INT DEFAULT 7,
+      ReminderType VARCHAR(100) DEFAULT 'Email',
+      IsActive TINYINT DEFAULT 1,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS EscalationRules (
+      EscalationID INT PRIMARY KEY AUTO_INCREMENT,
+      CompanyID INT NOT NULL,
+      RuleName VARCHAR(500) NOT NULL,
+      TriggerType VARCHAR(100) DEFAULT 'Overdue',
+      TriggerDays INT DEFAULT 3,
+      EscalateToRoleID INT,
+      NotificationType VARCHAR(100) DEFAULT 'Email',
+      IsActive TINYINT DEFAULT 1,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Notifications (
+      NotificationID INT PRIMARY KEY AUTO_INCREMENT,
+      UserID INT NOT NULL,
+      CompanyID INT,
+      Title VARCHAR(500) NOT NULL,
+      Message TEXT,
+      Type VARCHAR(100) DEFAULT 'Info',
+      ReferenceType VARCHAR(100),
+      ReferenceID INT,
+      IsRead TINYINT DEFAULT 0,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskTemplates (
+      TemplateID INT PRIMARY KEY AUTO_INCREMENT,
+      CompanyID INT NOT NULL,
+      TemplateName VARCHAR(500) NOT NULL,
+      Description TEXT,
+      Priority VARCHAR(50) DEFAULT 'Medium',
+      EstimatedHours DECIMAL(10,2),
+      DepartmentID INT,
+      IsActive TINYINT DEFAULT 1,
+      CreatedBy INT,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Tenants (
+      TenantID INT PRIMARY KEY AUTO_INCREMENT,
+      TenantCode VARCHAR(100) UNIQUE NOT NULL,
+      TenantName VARCHAR(500) NOT NULL,
+      LegalName VARCHAR(500),
+      ContactPerson VARCHAR(500),
+      ContactEmail VARCHAR(255) NOT NULL,
+      ContactMobile VARCHAR(50),
+      Industry VARCHAR(200),
+      Address VARCHAR(500),
+      City VARCHAR(200),
+      State VARCHAR(200),
+      Country VARCHAR(200) DEFAULT 'India',
+      PINCode VARCHAR(20),
+      Website VARCHAR(500),
+      GSTIN VARCHAR(50),
+      PAN VARCHAR(50),
+      Logo VARCHAR(500),
+      SubscriptionTier VARCHAR(100) DEFAULT 'Standard',
+      MaxCompanies INT DEFAULT 5,
+      MaxUsers INT DEFAULT 50,
+      LicenseStartDate VARCHAR(20),
+      LicenseEndDate VARCHAR(20),
+      EnabledModules TEXT,
+      Status VARCHAR(50) DEFAULT 'Pending',
+      IsDeleted TINYINT DEFAULT 0,
+      CreatedBy INT,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UpdatedBy INT,
+      UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TenantRegistrations (
+      RegistrationID INT PRIMARY KEY AUTO_INCREMENT,
+      TenantID INT,
+      RegistrationToken VARCHAR(500) UNIQUE NOT NULL,
+      TokenExpiresAt DATETIME NOT NULL,
+      CompanyName VARCHAR(500) NOT NULL,
+      LegalName VARCHAR(500),
+      ContactPerson VARCHAR(500) NOT NULL,
+      ContactEmail VARCHAR(255) NOT NULL,
+      ContactMobile VARCHAR(50),
+      Address VARCHAR(500),
+      City VARCHAR(200),
+      State VARCHAR(200),
+      Country VARCHAR(200) DEFAULT 'India',
+      PINCode VARCHAR(20),
+      GSTIN VARCHAR(50),
+      PAN VARCHAR(50),
+      Website VARCHAR(500),
+      Industry VARCHAR(200),
+      CompanyType VARCHAR(100) DEFAULT 'Subsidiary',
+      NumBranches INT DEFAULT 1,
+      NumUsers INT DEFAULT 10,
+      RequestedModules TEXT,
+      AdminName VARCHAR(500),
+      AdminEmail VARCHAR(255),
+      AdminUsername VARCHAR(255),
+      PasswordHash VARCHAR(500),
+      Status VARCHAR(50) DEFAULT 'Pending',
+      RejectionReason TEXT,
+      ReviewedBy INT,
+      ReviewedAt DATETIME,
+      Notes TEXT,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  // Seed data if tables are empty
+  const [userRows] = await mysqlPool!.execute('SELECT COUNT(*) as cnt FROM Users');
+  const userCount = (userRows as any[])[0].cnt;
+
+  if (userCount === 0) {
+    console.log('[Database] Seeding MySQL database with demo data...');
+
+    // Roles
+    await runSql(`INSERT INTO Roles (RoleID, RoleName, Description, IsSystemRole) VALUES
+      (1, 'Super Admin', 'Full system access with all permissions', 1),
+      (2, 'Finance Admin', 'Financial operations and reporting access', 1),
+      (3, 'Management', 'Strategic oversight and approval authority', 1),
+      (4, 'Manager', 'Department management and task oversight', 1),
+      (5, 'Employee', 'Standard task execution and date management', 1),
+      (6, 'Viewer', 'Read-only access across assigned modules', 1)
+    `);
+
+    // Permissions
+    await runSql(`INSERT INTO Permissions (PermissionCode, PermissionName, Module, Description) VALUES
+      ('TASK_VIEW', 'View Tasks', 'Tasks', 'View task list and details'),
+      ('TASK_CREATE', 'Create Tasks', 'Tasks', 'Create new tasks'),
+      ('TASK_EDIT', 'Edit Tasks', 'Tasks', 'Edit existing tasks'),
+      ('TASK_DELETE', 'Delete Tasks', 'Tasks', 'Delete tasks'),
+      ('TASK_APPROVE', 'Approve Tasks', 'Tasks', 'Approve submitted tasks'),
+      ('TASK_ASSIGN', 'Assign Tasks', 'Tasks', 'Assign tasks to employees'),
+      ('DATE_VIEW', 'View Important Dates', 'Dates', 'View important dates'),
+      ('DATE_CREATE', 'Create Important Dates', 'Dates', 'Create new important dates'),
+      ('DATE_EDIT', 'Edit Important Dates', 'Dates', 'Edit existing important dates'),
+      ('DATE_DELETE', 'Delete Important Dates', 'Dates', 'Delete important dates'),
+      ('DATE_RENEW', 'Renew Important Dates', 'Dates', 'Renew expiring items'),
+      ('REPORT_VIEW', 'View Reports', 'Reports', 'View reports and analytics'),
+      ('REPORT_EXPORT', 'Export Reports', 'Reports', 'Export reports to file'),
+      ('USER_MANAGE', 'Manage Users', 'Admin', 'Create, edit, delete users'),
+      ('ROLE_MANAGE', 'Manage Roles', 'Admin', 'Manage roles and permissions'),
+      ('COMPANY_MANAGE', 'Manage Companies', 'Admin', 'Manage company settings'),
+      ('AUDIT_VIEW', 'View Audit Logs', 'Admin', 'View system audit trail'),
+      ('SETTINGS_MANAGE', 'Manage Settings', 'Admin', 'Configure system settings'),
+      ('MASTER_MANAGE', 'Manage Masters', 'Admin', 'Manage master data'),
+      ('CALENDAR_VIEW', 'View Calendar', 'Calendar', 'View calendar and events'),
+      ('NOTIFICATION_MANAGE', 'Manage Notifications', 'Admin', 'Manage notification settings'),
+      ('DEPARTMENT_MANAGE', 'Manage Departments', 'Admin', 'Manage departments'),
+      ('EMPLOYEE_MANAGE', 'Manage Employees', 'Admin', 'Manage employee records'),
+      ('LOCATION_MANAGE', 'Manage Locations', 'Admin', 'Manage company locations')
+    `);
+
+    // RolePermissions — Super Admin gets all
+    const [permRows] = await mysqlPool!.execute('SELECT PermissionID FROM Permissions');
+    for (const p of (permRows as any[])) {
+      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (1, ?)', [p.PermissionID]);
+    }
+    // Finance Admin
+    const financePerms = ['TASK_VIEW','TASK_CREATE','TASK_EDIT','DATE_VIEW','DATE_CREATE','DATE_EDIT','DATE_RENEW','REPORT_VIEW','REPORT_EXPORT','CALENDAR_VIEW'];
+    for (const code of financePerms) {
+      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 2, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
+    }
+    // Management
+    const mgmtPerms = ['TASK_VIEW','TASK_APPROVE','DATE_VIEW','DATE_CREATE','DATE_EDIT','DATE_RENEW','REPORT_VIEW','REPORT_EXPORT','AUDIT_VIEW','CALENDAR_VIEW'];
+    for (const code of mgmtPerms) {
+      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 3, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
+    }
+    // Manager
+    const mgrPerms = ['TASK_VIEW','TASK_CREATE','TASK_EDIT','TASK_APPROVE','TASK_ASSIGN','DATE_VIEW','DATE_CREATE','DATE_EDIT','DATE_RENEW','REPORT_VIEW','CALENDAR_VIEW'];
+    for (const code of mgrPerms) {
+      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 4, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
+    }
+    // Employee
+    const empPerms = ['TASK_VIEW','TASK_EDIT','DATE_VIEW','CALENDAR_VIEW'];
+    for (const code of empPerms) {
+      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 5, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
+    }
+    // Viewer
+    const viewerPerms = ['TASK_VIEW','DATE_VIEW','REPORT_VIEW','CALENDAR_VIEW'];
+    for (const code of viewerPerms) {
+      await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) SELECT 6, PermissionID FROM Permissions WHERE PermissionCode = ?', [code]);
+    }
+
+    // Locations
+    await runSql(`INSERT INTO Locations (LocationID, CompanyID, LocationName, LocationCode, City, State, IsHeadOffice) VALUES
+      (1, 1, 'Head Office - Mumbai', 'HO-MUM', 'Mumbai', 'Maharashtra', 1),
+      (2, 1, 'Tech Hub - Bangalore', 'TH-BLR', 'Bangalore', 'Karnataka', 0),
+      (3, 1, 'Regional Office - Delhi', 'RO-DEL', 'New Delhi', 'Delhi', 0)
+    `);
+
+    // Departments
+    await runSql(`INSERT INTO Departments (DepartmentID, CompanyID, DepartmentName, DepartmentCode, HOD_EmployeeID) VALUES
+      (1, 1, 'Information Technology', 'IT', 1),
+      (2, 1, 'Finance & Accounts', 'FIN', 5),
+      (3, 1, 'Human Resources', 'HR', 7),
+      (4, 1, 'Operations & Procurement', 'OPS', 8),
+      (5, 1, 'Admin & Facilities', 'ADM', 6)
+    `);
+
+    // Companies
+    await runSql(`INSERT INTO Companies (CompanyID, ParentCompanyID, CompanyCode, CompanyName, LegalName, CompanyType, City, State, TenantID) VALUES
+      (1, NULL, 'ABC-GRP', 'ABC Group Holdings Ltd', 'ABC Group Holdings Private Limited', 'Holding', 'Mumbai', 'Maharashtra', 1),
+      (2, 1, 'ABC-TECH', 'ABC Technologies Pvt Ltd', 'ABC Technologies Private Limited', 'Subsidiary', 'Bangalore', 'Karnataka', 1),
+      (3, 1, 'ABC-FIN', 'ABC Financial Services', 'ABC Financial Services Limited', 'Subsidiary', 'Mumbai', 'Maharashtra', 1),
+      (4, 2, 'ABC-SOFT', 'ABC Software Solutions', 'ABC Software Solutions Pvt Ltd', 'Branch', 'Hyderabad', 'Telangana', 1),
+      (5, 1, 'ABC-MFG', 'ABC Manufacturing Ltd', 'ABC Manufacturing Limited', 'Subsidiary', 'Pune', 'Maharashtra', 1),
+      (6, 1, 'ABC-LOG', 'ABC Logistics & Supply Chain', 'ABC Logistics Pvt Ltd', 'Subsidiary', 'Chennai', 'Tamil Nadu', 1),
+      (7, 3, 'ABC-INS', 'ABC Insurance Brokers', 'ABC Insurance Broking Services', 'Branch', 'Delhi', 'Delhi', 1),
+      (8, 2, 'ABC-CLOUD', 'ABC Cloud Services', 'ABC Cloud Infrastructure Pvt Ltd', 'Branch', 'Bangalore', 'Karnataka', 1),
+      (9, 5, 'ABC-AUTO', 'ABC Auto Components', 'ABC Auto Components Manufacturing Ltd', 'Branch', 'Pune', 'Maharashtra', 1)
+    `);
+
+    // Employees
+    await runSql(`INSERT INTO Employees (EmployeeID, CompanyID, EmployeeCode, FullName, DepartmentID, Designation, LocationID, Phone, Email, JoiningDate, DateOfBirth, AnniversaryDate, Status, TenantID) VALUES
+      (1, 1, 'EMP-001', 'Suresh Menon', 1, 'Chief Technology Officer', 1, '+91 98765 11001', 'suresh.menon@apexcorp.com', '2018-04-15', '1985-03-22', '2018-04-15', 'Active', 1),
+      (2, 1, 'EMP-002', 'Priya Sharma', 2, 'Chief Financial Officer', 1, '+91 98765 11002', 'priya.sharma@apexcorp.com', '2019-06-01', '1983-08-14', '2019-06-01', 'Active', 1),
+      (3, 1, 'EMP-003', 'Amit Patel', 1, 'Senior DevOps & Systems Lead', 2, '+91 98450 11003', 'amit.patel@apexcorp.com', '2020-01-10', '1988-10-05', '2020-01-10', 'Active', 1),
+      (4, 1, 'EMP-004', 'Rahul Verma', 1, 'Database & Security Admin', 1, '+91 98201 11004', 'rahul.verma@apexcorp.com', '2021-03-15', '1992-09-02', '2021-03-15', 'Active', 1),
+      (5, 1, 'EMP-005', 'Neha Kulkarni', 2, 'Senior Accounts Executive', 1, '+91 98201 11005', 'neha.kulkarni@apexcorp.com', '2021-07-20', '1991-11-25', '2021-07-20', 'Active', 1),
+      (6, 1, 'EMP-006', 'Rohan Deshmukh', 5, 'Facilities & Maintenance Lead', 1, '+91 98201 11006', 'rohan.deshmukh@apexcorp.com', '2019-11-01', '1987-12-14', '2019-11-01', 'Active', 1),
+      (7, 1, 'EMP-007', 'Sneha Nair', 3, 'HR & Compliance Manager', 2, '+91 98450 11007', 'sneha.nair@apexcorp.com', '2020-08-15', '1990-04-18', '2020-08-15', 'Active', 1),
+      (8, 1, 'EMP-008', 'Vikram Malhotra', 4, 'Procurement Manager', 3, '+91 98110 11008', 'vikram.malhotra@apexcorp.com', '2020-02-01', '1986-07-08', '2020-02-01', 'Active', 1),
+      (9, 1, 'EMP-009', 'Ananya Sen', 3, 'Talent Acquisition Specialist', 2, '+91 98450 11009', 'ananya.sen@apexcorp.com', '2022-05-10', '1994-02-28', '2022-05-10', 'Active', 1),
+      (10, 1, 'EMP-010', 'Karan Mehra', 5, 'Safety & Security Officer', 3, '+91 98110 11010', 'karan.mehra@apexcorp.com', '2022-09-01', '1993-06-17', '2022-09-01', 'Active', 1)
+    `);
+
+    // Users — generate a real bcrypt hash for the demo password
+    const pwdHash = bcrypt.hashSync('Password@123', 10);
+    await mysqlPool!.execute(`INSERT INTO Users (UserID, CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status, TenantID) VALUES
+      (1, 1, 1, 'admin@company.com', 'admin@company.com', ?, 1, 'Active', 1),
+      (2, 1, 2, 'finance.admin@company.com', 'finance.admin@company.com', ?, 2, 'Active', 1),
+      (3, 1, 1, 'management@company.com', 'management@company.com', ?, 3, 'Active', 1),
+      (4, 1, 3, 'manager.it@company.com', 'manager.it@company.com', ?, 4, 'Active', 1),
+      (5, 1, 4, 'employee.rahul@company.com', 'employee.rahul@company.com', ?, 5, 'Active', 1),
+      (6, 1, 5, 'employee.neha@company.com', 'employee.neha@company.com', ?, 5, 'Active', 1),
+      (7, 1, 6, 'employee.rohan@company.com', 'employee.rohan@company.com', ?, 5, 'Active', 1),
+      (8, 1, 7, 'manager.hr@company.com', 'manager.hr@company.com', ?, 4, 'Active', 1),
+      (9, 1, 8, 'manager.purchase@company.com', 'manager.purchase@company.com', ?, 4, 'Active', 1),
+      (10, 1, NULL, 'viewer@company.com', 'viewer@company.com', ?, 6, 'Active', 1)
+    `, [pwdHash, pwdHash, pwdHash, pwdHash, pwdHash, pwdHash, pwdHash, pwdHash, pwdHash, pwdHash]);
+
+    // UserCompany mappings
+    await runSql(`INSERT INTO UserCompany (UserID, CompanyID, RoleID, IsPrimary, AccessScope) VALUES
+      (1, 1, 1, 1, 'All'), (1, 2, 1, 0, 'All'), (1, 3, 1, 0, 'All'),
+      (2, 1, 2, 1, 'Department'), (3, 1, 3, 1, 'All'),
+      (4, 1, 4, 1, 'Department'), (4, 2, 4, 0, 'Department'),
+      (5, 1, 5, 1, 'Own'), (6, 1, 5, 1, 'Own'), (7, 1, 5, 1, 'Own'),
+      (8, 1, 4, 1, 'Department'), (9, 1, 4, 1, 'Department'),
+      (10, 1, 6, 1, 'All')
+    `);
+
+    // DateCategories
+    await runSql(`INSERT INTO DateCategories (CategoryName, ColorCode, Icon, IsSystem) VALUES
+      ('Employee Birthday', '#ec4899', 'Cake', 1),
+      ('Employee Work Anniversary', '#f59e0b', 'Award', 1),
+      ('Company Anniversary', '#8b5cf6', 'PartyPopper', 1),
+      ('Contract Expiry', '#ef4444', 'FileText', 1),
+      ('AMC Expiry', '#3b82f6', 'Wrench', 1),
+      ('Warranty Expiry', '#06b6d4', 'ShieldAlert', 1),
+      ('Insurance Expiry', '#10b981', 'ShieldCheck', 1),
+      ('License Renewal', '#6366f1', 'FileCheck', 1),
+      ('Registration Renewal', '#84cc16', 'BookmarkCheck', 1),
+      ('Agreement Expiry', '#f97316', 'FileSignature', 1),
+      ('Lease Expiry', '#a855f7', 'Building2', 1),
+      ('Payment Due Date', '#e11d48', 'CreditCard', 1),
+      ('Tax Filing Deadline', '#14b8a6', 'Calculator', 1),
+      ('Audit Schedule', '#f43f5e', 'ClipboardCheck', 1),
+      ('Compliance Due Date', '#0ea5e9', 'Scale', 1)
+    `);
+
+    // Default tenant
+    await runSql(`INSERT INTO Tenants (TenantID, TenantCode, TenantName, LegalName, ContactPerson, ContactEmail, Industry, City, State, Country, SubscriptionTier, MaxCompanies, MaxUsers, LicenseStartDate, LicenseEndDate, EnabledModules, Status) VALUES
+      (1, 'DEFAULT', 'Default Organization', 'Default Organization Pvt Ltd', 'System Admin', 'admin@company.com', 'Technology', 'Mumbai', 'Maharashtra', 'India', 'Enterprise', 100, 1000, '2025-01-01', '2030-12-31', '["tasks","dates","calendar","reports","audit"]', 'Active')
+    `);
+
+    // Platform Admin role
+    await runSql(`INSERT INTO Roles (RoleName, Description, IsSystemRole, IsPlatformRole) VALUES ('Platform Admin', 'Full platform access across all tenants and companies', 1, 1)`);
+
+    // Grant all permissions to Platform Admin
+    const [platRole] = await mysqlPool!.execute("SELECT RoleID FROM Roles WHERE RoleName = 'Platform Admin' LIMIT 1");
+    const platformRoleId = (platRole as any[])[0]?.RoleID || 7;
+    const [allPerms] = await mysqlPool!.execute('SELECT PermissionID FROM Permissions');
+    for (const p of (allPerms as any[])) {
+      try {
+        await mysqlPool!.execute('INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (?, ?)', [platformRoleId, p.PermissionID]);
+      } catch {}
+    }
+
+    // Platform super admin user
+    const platformPassword = process.env.PLATFORM_ADMIN_PASSWORD || 'PlatformAdmin@2026!';
+    const platformPwdHash = bcrypt.hashSync(platformPassword, 12);
+    await mysqlPool!.execute(`INSERT INTO Users (CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status, TenantID, IsPlatformAdmin, MustChangePassword) VALUES (1, NULL, 'sverpadmin', 'platform@erp-system.com', ?, ?, 'Active', NULL, 1, 1)`, [platformPwdHash, platformRoleId]);
+
+    console.log('[Database] MySQL seed completed successfully.');
+  }
 }
 
 /**
@@ -1111,6 +1764,116 @@ function replaceDateDiff(sql: string): string {
 }
 
 /**
+ * Translates SQL Server T-SQL dialect to MySQL/MariaDB
+ */
+function translateQueryForMysql(queryText: string, params: Record<string, any>): { sql: string; values: any[] } {
+  let q = queryText;
+
+  // Remove dbo. prefix
+  q = q.replace(/dbo\./g, '');
+
+  // Handle TOP N queries: SELECT TOP 10 ... -> SELECT ... LIMIT 10
+  let limitFromTop: number | null = null;
+  q = q.replace(/SELECT\s+TOP\s+(\d+)/i, (match, count) => {
+    limitFromTop = parseInt(count, 10);
+    return 'SELECT';
+  });
+
+  // Clean N-prefixed strings
+  q = q.replace(/N'([^']*)'/g, "'$1'");
+
+  // Date functions
+  q = q.replace(/CAST\(GETDATE\(\) AS DATE\)/gi, 'CURDATE()');
+  q = q.replace(/GETDATE\(\)/gi, 'NOW()');
+  q = q.replace(/SYSUTCDATETIME\(\)/gi, 'UTC_TIMESTAMP()');
+
+  // ISNULL → IFNULL
+  q = q.replace(/ISNULL\(/gi, 'IFNULL(');
+
+  // DATEDIFF(day, a, b) → DATEDIFF(b, a) — MySQL DATEDIFF returns days, args reversed
+  q = replaceDateDiffMysql(q);
+
+  // DATEADD(day, N, date) → DATE_ADD(date, INTERVAL N DAY)
+  q = q.replace(/DATEADD\(day,\s*([^,]+),\s*([^)]+)\)/gi, (match, interval, dateExpr) => {
+    return `DATE_ADD(${dateExpr.trim()}, INTERVAL ${interval.trim()} DAY)`;
+  });
+
+  // CAST(x AS DATE)
+  q = q.replace(/CAST\(([^)]+)\s+AS\s+DATE\)/gi, 'DATE($1)');
+  q = q.replace(/CAST\(([^)]+)\s+AS\s+DECIMAL\(([^)]+)\)\)/gi, 'CAST($1 AS DECIMAL($2))');
+
+  // STRING_AGG → GROUP_CONCAT
+  q = q.replace(/STRING_AGG\(([^,]+),\s*'([^']+)'\)/gi, "GROUP_CONCAT($1 SEPARATOR '$2')");
+
+  // OUTPUT INSERTED.* — not supported in MySQL, remove
+  q = q.replace(/OUTPUT INSERTED\.(\w+)/gi, '');
+
+  // Pagination: OFFSET @offset ROWS FETCH NEXT @limitNum ROWS ONLY → LIMIT @limitNum OFFSET @offset
+  const offsetMatch = q.match(/OFFSET\s+@offset\s+ROWS\s+FETCH\s+NEXT\s+@limitNum\s+ROWS\s+ONLY/i);
+  if (offsetMatch) {
+    q = q.replace(offsetMatch[0], 'LIMIT @limitNum OFFSET @offset');
+  } else if (limitFromTop !== null && !q.toUpperCase().includes('LIMIT')) {
+    q += ` LIMIT ${limitFromTop}`;
+  }
+
+  // Extract named parameters → positional ?
+  const paramValues: any[] = [];
+  const paramMatches = q.match(/@(\w+)/g);
+  if (paramMatches) {
+    for (const match of paramMatches) {
+      const paramName = match.substring(1);
+      if (params.hasOwnProperty(paramName)) {
+        paramValues.push(params[paramName]);
+      } else {
+        paramValues.push(null);
+      }
+    }
+  }
+
+  q = q.replace(/@\w+/g, '?');
+
+  return { sql: q, values: paramValues };
+}
+
+function replaceDateDiffMysql(sqlStr: string): string {
+  let result = '';
+  let i = 0;
+  while (i < sqlStr.length) {
+    const diffIdx = sqlStr.toUpperCase().indexOf('DATEDIFF(DAY,', i);
+    if (diffIdx === -1) {
+      result += sqlStr.substring(i);
+      break;
+    }
+    result += sqlStr.substring(i, diffIdx);
+    let startArg = diffIdx + 'DATEDIFF(DAY,'.length;
+    let depth = 1;
+    let currentArg = '';
+    const args: string[] = [];
+    let j = startArg;
+    while (j < sqlStr.length && depth > 0) {
+      const char = sqlStr[j];
+      if (char === '(') depth++;
+      else if (char === ')') depth--;
+      if ((char === ',' && depth === 1) || (char === ')' && depth === 0)) {
+        args.push(currentArg.trim());
+        currentArg = '';
+      } else {
+        currentArg += char;
+      }
+      j++;
+    }
+    if (args.length >= 2) {
+      // MySQL DATEDIFF(end, start) — opposite of T-SQL DATEDIFF(day, start, end)
+      result += `DATEDIFF(${args[1]}, ${args[0]})`;
+    } else {
+      result += sqlStr.substring(diffIdx, j);
+    }
+    i = j;
+  }
+  return result;
+}
+
+/**
  * Translates SQL Server T-SQL dialect to ANSI/SQLite when in SQLite mode
  */
 function translateQueryForSqlite(queryText: string, params: Record<string, any>): { sql: string; values: any[] } {
@@ -1185,7 +1948,55 @@ export async function executeQuery<T = any>(
 ): Promise<{ recordset: T[]; rowsAffected: number[] }> {
   await getDbPool();
 
-  if (activeEngine === 'mssql' && mssqlPool && mssqlPool.connected) {
+  if (activeEngine === 'mysql' && mysqlPool) {
+    const { sql: translatedSql, values } = translateQueryForMysql(queryText, params);
+    const isSelect = translatedSql.trim().toUpperCase().startsWith('SELECT');
+
+    try {
+      const [result, fields] = await mysqlPool.execute(translatedSql, values);
+      if (isSelect) {
+        const rows = (result as any[]).map((row: any) => {
+          const newRow: any = { ...row };
+          for (const key of Object.keys(newRow)) {
+            if (
+              (key.endsWith('Date') || key.endsWith('At')) &&
+              newRow[key] instanceof Date
+            ) {
+              // Keep as Date object for consistency
+            }
+          }
+          return newRow;
+        });
+        return { recordset: rows as T[], rowsAffected: [rows.length] };
+      } else {
+        const info = result as any;
+        const recordset: any[] = [];
+        if (info.insertId) {
+          recordset.push({
+            CompanyID: info.insertId,
+            UserCompanyID: info.insertId,
+            TaskID: info.insertId,
+            ImportantDateID: info.insertId,
+            EmployeeID: info.insertId,
+            UserID: info.insertId,
+            LocationID: info.insertId,
+            DepartmentID: info.insertId,
+            CategoryID: info.insertId,
+            TemplateID: info.insertId,
+            CommentID: info.insertId,
+            AttachmentID: info.insertId,
+            ActivityID: info.insertId,
+            TenantID: info.insertId,
+            RegistrationID: info.insertId,
+          });
+        }
+        return { recordset: recordset as T[], rowsAffected: [info.affectedRows || 0] };
+      }
+    } catch (err: any) {
+      console.error('[MySQL Query Error]:', err.message, '\nSQL:', translatedSql);
+      throw err;
+    }
+  } else if (activeEngine === 'mssql' && mssqlPool && mssqlPool.connected) {
     const request = mssqlPool.request();
     for (const [key, value] of Object.entries(params)) {
       if (value === undefined || value === null) {
