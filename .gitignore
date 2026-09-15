@@ -43,3 +43,8 @@ backend/uploads/
 
 # Claude Code session files
 .claude/
+
+# Server credentials & zip archives
+ssh.txt
+*.zip
+
