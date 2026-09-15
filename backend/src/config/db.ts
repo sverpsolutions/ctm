@@ -561,6 +561,131 @@ async function initMysqlSchemaAndSeed() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS ImportantDateCategories (
+      CategoryID INT PRIMARY KEY AUTO_INCREMENT,
+      CategoryName VARCHAR(500) NOT NULL,
+      ColorCode VARCHAR(50),
+      Icon VARCHAR(100),
+      IsSystem TINYINT DEFAULT 0,
+      IsDeleted TINYINT DEFAULT 0,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS ImportantDateReminders (
+      ReminderID INT PRIMARY KEY AUTO_INCREMENT,
+      ImportantDateID INT NOT NULL,
+      ReminderDate VARCHAR(20) NOT NULL,
+      ReminderType VARCHAR(100) DEFAULT 'Email',
+      \`Status\` VARCHAR(50) DEFAULT 'Pending',
+      SentAt DATETIME,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS ImportantDateHistory (
+      HistoryID INT PRIMARY KEY AUTO_INCREMENT,
+      ImportantDateID INT NOT NULL,
+      \`Action\` VARCHAR(200) NOT NULL,
+      OldValue LONGTEXT,
+      NewValue LONGTEXT,
+      ChangedBy INT,
+      ChangedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskCategories (
+      CategoryID INT PRIMARY KEY AUTO_INCREMENT,
+      CompanyID INT NOT NULL,
+      CategoryName VARCHAR(500) NOT NULL,
+      ColorCode VARCHAR(50),
+      Icon VARCHAR(100),
+      IsActive TINYINT DEFAULT 1,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskChecklist (
+      ChecklistID INT PRIMARY KEY AUTO_INCREMENT,
+      TaskID INT NOT NULL,
+      ItemText VARCHAR(500) NOT NULL,
+      IsCompleted TINYINT DEFAULT 0,
+      CompletedBy INT,
+      CompletedAt DATETIME,
+      SortOrder INT DEFAULT 0,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskUpdates (
+      UpdateID INT PRIMARY KEY AUTO_INCREMENT,
+      TaskID INT NOT NULL,
+      UserID INT NOT NULL,
+      UpdateText LONGTEXT NOT NULL,
+      UpdateType VARCHAR(100) DEFAULT 'Comment',
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskActivityLog (
+      ActivityID INT PRIMARY KEY AUTO_INCREMENT,
+      TaskID INT NOT NULL,
+      UserID INT,
+      ActivityType VARCHAR(200) NOT NULL,
+      Description LONGTEXT,
+      OldValue LONGTEXT,
+      NewValue LONGTEXT,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS RecurringTasks (
+      RecurringTaskID INT PRIMARY KEY AUTO_INCREMENT,
+      CompanyID INT NOT NULL,
+      DepartmentID INT,
+      LocationID INT,
+      CategoryID INT,
+      TaskTitle VARCHAR(500) NOT NULL,
+      TaskDescription LONGTEXT,
+      AssignedToEmployeeID INT,
+      AssignedByID INT NOT NULL,
+      Priority VARCHAR(500) DEFAULT 'Medium',
+      RecurrencePattern VARCHAR(500) NOT NULL,
+      \`Interval\` INT DEFAULT 1,
+      DaysOfWeek VARCHAR(500),
+      DayOfMonth INT,
+      EstimatedHours DECIMAL(10,2) DEFAULT 0.0,
+      StartDate VARCHAR(20) NOT NULL,
+      EndDate VARCHAR(20),
+      LastGeneratedDate VARCHAR(20),
+      NextDueDate VARCHAR(20) NOT NULL,
+      IsActive TINYINT DEFAULT 1,
+      ChecklistJSON LONGTEXT,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS NotificationLog (
+      LogID INT PRIMARY KEY AUTO_INCREMENT,
+      NotificationID INT,
+      UserID INT NOT NULL,
+      Channel VARCHAR(100) DEFAULT 'InApp',
+      \`Status\` VARCHAR(50) DEFAULT 'Sent',
+      SentAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      ErrorMessage LONGTEXT
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
   // Seed data if tables are empty
   const [userRows] = await mysqlPool!.execute('SELECT COUNT(*) as cnt FROM Users');
   const userCount = (userRows as any[])[0].cnt;
