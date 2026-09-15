@@ -4,7 +4,17 @@ import fs from 'fs';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 
-dotenv.config({ path: path.join(__dirname, '../../.env') });
+const possibleEnvPaths = [
+  path.join(__dirname, '../../.env'),
+  path.join(__dirname, '../../../.env'),
+  path.join(__dirname, '../../.env.production'),
+];
+for (const p of possibleEnvPaths) {
+  if (fs.existsSync(p)) {
+    dotenv.config({ path: p });
+    break;
+  }
+}
 
 // Dynamic imports for mssql/sqlite3 — they are optional and may not be installed (e.g. on Linux servers using MySQL only)
 let sql: any = null;
@@ -68,7 +78,7 @@ export async function getDbPool(): Promise<any> {
   if (activeEngine === null && !isInitializing) {
     isInitializing = true;
 
-    if (process.env.DB_ENGINE === 'mysql') {
+    if (process.env.DB_ENGINE === 'mysql' || (!process.env.DB_ENGINE && process.env.MYSQL_DATABASE)) {
       console.log(`[Database] Initializing MySQL/MariaDB connection.`);
       activeEngine = 'mysql';
       const pool = await initMysql();

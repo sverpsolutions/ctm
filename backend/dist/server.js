@@ -12,7 +12,17 @@ const api_routes_1 = __importDefault(require("./routes/api.routes"));
 const errorHandler_1 = require("./middleware/errorHandler");
 const db_1 = require("./config/db");
 const scheduler_job_1 = require("./jobs/scheduler.job");
-dotenv_1.default.config({ path: path_1.default.join(__dirname, '../.env') });
+const possibleEnvPaths = [
+    path_1.default.join(__dirname, '../.env'),
+    path_1.default.join(__dirname, '../../.env'),
+    path_1.default.join(__dirname, '../.env.production'),
+];
+for (const p of possibleEnvPaths) {
+    if (fs_1.default.existsSync(p)) {
+        dotenv_1.default.config({ path: p });
+        break;
+    }
+}
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
 // Middleware

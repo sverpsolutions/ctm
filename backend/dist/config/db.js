@@ -44,7 +44,17 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
-dotenv_1.default.config({ path: path_1.default.join(__dirname, '../../.env') });
+const possibleEnvPaths = [
+    path_1.default.join(__dirname, '../../.env'),
+    path_1.default.join(__dirname, '../../../.env'),
+    path_1.default.join(__dirname, '../../.env.production'),
+];
+for (const p of possibleEnvPaths) {
+    if (fs_1.default.existsSync(p)) {
+        dotenv_1.default.config({ path: p });
+        break;
+    }
+}
 // Dynamic imports for mssql/sqlite3 — they are optional and may not be installed (e.g. on Linux servers using MySQL only)
 let sql = null;
 exports.sql = sql;
@@ -109,7 +119,7 @@ async function getDbPool() {
     }
     if (activeEngine === null && !isInitializing) {
         isInitializing = true;
-        if (process.env.DB_ENGINE === 'mysql') {
+        if (process.env.DB_ENGINE === 'mysql' || (!process.env.DB_ENGINE && process.env.MYSQL_DATABASE)) {
             console.log(`[Database] Initializing MySQL/MariaDB connection.`);
             activeEngine = 'mysql';
             const pool = await initMysql();

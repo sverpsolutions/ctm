@@ -8,7 +8,17 @@ import { errorHandler } from './middleware/errorHandler';
 import { getDbPool } from './config/db';
 import { initScheduler } from './jobs/scheduler.job';
 
-dotenv.config({ path: path.join(__dirname, '../.env') });
+const possibleEnvPaths = [
+  path.join(__dirname, '../.env'),
+  path.join(__dirname, '../../.env'),
+  path.join(__dirname, '../.env.production'),
+];
+for (const p of possibleEnvPaths) {
+  if (fs.existsSync(p)) {
+    dotenv.config({ path: p });
+    break;
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
