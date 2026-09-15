@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Environment & secrets
+.env
+backend/.env
+
+# Database files
+*.db
+*.bak
+*.sql
+backend/database/
+database/
+
+# Backup files
+backup/
+*_backup_*
+BACKUP_INFO.md
+
+# Build output
+frontend/dist/
+backend/dist/
+
+# Logs
+*.log
+start_output.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Uploads
+backend/uploads/
+
+# Claude Code session files
+.claude/

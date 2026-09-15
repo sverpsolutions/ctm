@@ -1,0 +1,29 @@
+{
+  "name": "company-task-management",
+  "version": "1.0.0",
+  "description": "Company Important Date & Task Management System",
+  "scripts": {
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue,green\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "start": "cd backend && npm start",
+    "db:setup": "cd backend && npm run db:setup",
+    "db:seed": "cd backend && npm run db:seed"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  },
+  "keywords": [
+    "task-management",
+    "important-dates",
+    "reminders",
+    "sql-server",
+    "react",
+    "typescript"
+  ],
+  "author": "Enterprise Architecture Team",
+  "license": "ISC"
+}

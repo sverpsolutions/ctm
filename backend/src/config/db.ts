@@ -1,0 +1,1271 @@
+import sql from 'mssql';
+import sqlite3 from 'sqlite3';
+import path from 'path';
+import fs from 'fs';
+import dotenv from 'dotenv';
+import bcrypt from 'bcryptjs';
+
+dotenv.config({ path: path.join(__dirname, '../../.env') });
+
+const isTrusted = process.env.DB_TRUSTED_CONNECTION === 'true';
+
+const mssqlConfig: sql.config = {
+  server: process.env.DB_SERVER || 'localhost',
+  database: process.env.DB_DATABASE || 'CompanyTaskDB',
+  port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 1433,
+  user: isTrusted ? undefined : process.env.DB_USER,
+  password: isTrusted ? undefined : process.env.DB_PASSWORD,
+  options: {
+    encrypt: process.env.DB_ENCRYPT === 'true',
+    trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
+    enableArithAbort: true,
+  },
+  connectionTimeout: 2000,
+  requestTimeout: 10000,
+};
+
+let mssqlPool: sql.ConnectionPool | null = null;
+let sqliteDb: sqlite3.Database | null = null;
+let activeEngine: 'mssql' | 'sqlite' | null = null;
+let isInitializing = false;
+
+export async function getDbPool(): Promise<any> {
+  if (activeEngine === 'mssql' && mssqlPool && mssqlPool.connected) {
+    return mssqlPool;
+  }
+  if (activeEngine === 'sqlite' && sqliteDb) {
+    return sqliteDb;
+  }
+
+  if (activeEngine === null && !isInitializing) {
+    isInitializing = true;
+    if (process.env.DB_ENGINE === 'sqlite') {
+      console.log(`[Database] Initializing Integrated Local Enterprise SQLite Engine (Instant Mode).`);
+      activeEngine = 'sqlite';
+      const db = await initSqlite();
+      isInitializing = false;
+      return db;
+    }
+    try {
+      const testPool = new sql.ConnectionPool(mssqlConfig);
+      await testPool.connect();
+      mssqlPool = testPool;
+      activeEngine = 'mssql';
+      isInitializing = false;
+      console.log(`[Database] Connected successfully to Microsoft SQL Server (${mssqlConfig.server} / ${mssqlConfig.database})`);
+      return mssqlPool;
+    } catch (err: any) {
+      console.log(`[Database] SQL Server TCP endpoint not reachable (${err.message}).`);
+      console.log(`[Database] Initializing Integrated Local Enterprise SQLite Engine.`);
+      activeEngine = 'sqlite';
+      const db = await initSqlite();
+      isInitializing = false;
+      return db;
+    }
+  }
+
+  if (activeEngine === 'sqlite') {
+    return initSqlite();
+  }
+
+  return mssqlPool;
+}
+
+function initSqlite(): Promise<sqlite3.Database> {
+  return new Promise((resolve, reject) => {
+    if (sqliteDb) {
+      return resolve(sqliteDb);
+    }
+
+    const dbPath = path.join(__dirname, '../../database/company_task.db');
+    const dbDir = path.dirname(dbPath);
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+
+    sqliteDb = new sqlite3.Database(dbPath, async (err) => {
+      if (err) {
+        return reject(err);
+      }
+      console.log(`[Database] SQLite Engine active at ${dbPath}`);
+      try {
+        await initSqliteSchemaAndSeed();
+        resolve(sqliteDb!);
+      } catch (setupErr) {
+        reject(setupErr);
+      }
+    });
+  });
+}
+
+/**
+ * Initializes SQLite tables & demo seeds matching SQL Server DDL
+ */
+async function initSqliteSchemaAndSeed() {
+  if (!sqliteDb) return;
+
+  const runSql = (sqlText: string) => {
+    return new Promise<void>((resolve, reject) => {
+      sqliteDb!.run(sqlText, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  };
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Companies (
+      CompanyID INTEGER PRIMARY KEY AUTOINCREMENT,
+      ParentCompanyID INTEGER,
+      CompanyCode TEXT UNIQUE,
+      CompanyName TEXT NOT NULL,
+      LegalName TEXT,
+      CompanyType TEXT DEFAULT 'Subsidiary',
+      ShortName TEXT,
+      Address TEXT,
+      City TEXT,
+      State TEXT,
+      Country TEXT DEFAULT 'India',
+      PINCode TEXT,
+      Phone TEXT,
+      Email TEXT,
+      Website TEXT,
+      GSTIN TEXT,
+      PAN TEXT,
+      Logo TEXT,
+      EnabledModules TEXT DEFAULT '["tasks","dates","calendar","reports","audit"]',
+      SubscriptionTier TEXT DEFAULT 'Enterprise',
+      MaxUsers INTEGER DEFAULT 100,
+      FinancialYear TEXT DEFAULT '2026-2027',
+      TimeZone TEXT DEFAULT 'Asia/Kolkata',
+      DefaultReminderSettings TEXT,
+      Status TEXT DEFAULT 'Active',
+      IsDeleted INTEGER DEFAULT 0,
+      CreatedBy INTEGER,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedBy INTEGER,
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS UserCompany (
+      UserCompanyID INTEGER PRIMARY KEY AUTOINCREMENT,
+      UserID INTEGER NOT NULL,
+      CompanyID INTEGER NOT NULL,
+      RoleID INTEGER NOT NULL,
+      AccessScope TEXT DEFAULT 'Own',
+      IsPrimary INTEGER DEFAULT 0,
+      IsActive INTEGER DEFAULT 1,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedAt TEXT DEFAULT (datetime('now')),
+      UNIQUE(UserID, CompanyID)
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Locations (
+      LocationID INTEGER PRIMARY KEY AUTOINCREMENT,
+      CompanyID INTEGER NOT NULL,
+      LocationCode TEXT NOT NULL,
+      LocationName TEXT NOT NULL,
+      Address TEXT,
+      City TEXT,
+      State TEXT,
+      ContactPerson TEXT,
+      Phone TEXT,
+      Email TEXT,
+      Status TEXT DEFAULT 'Active',
+      IsDeleted INTEGER DEFAULT 0,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Departments (
+      DepartmentID INTEGER PRIMARY KEY AUTOINCREMENT,
+      CompanyID INTEGER NOT NULL,
+      DepartmentCode TEXT NOT NULL,
+      DepartmentName TEXT NOT NULL,
+      DepartmentHeadID INTEGER,
+      Status TEXT DEFAULT 'Active',
+      IsDeleted INTEGER DEFAULT 0,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Roles (
+      RoleID INTEGER PRIMARY KEY AUTOINCREMENT,
+      RoleName TEXT NOT NULL UNIQUE,
+      Description TEXT,
+      IsSystemRole INTEGER DEFAULT 1,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Permissions (
+      PermissionID INTEGER PRIMARY KEY AUTOINCREMENT,
+      PermissionCode TEXT NOT NULL UNIQUE,
+      ModuleName TEXT NOT NULL,
+      Description TEXT
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS RolePermissions (
+      RoleID INTEGER NOT NULL,
+      PermissionID INTEGER NOT NULL,
+      PRIMARY KEY (RoleID, PermissionID)
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Employees (
+      EmployeeID INTEGER PRIMARY KEY AUTOINCREMENT,
+      CompanyID INTEGER NOT NULL,
+      EmployeeCode TEXT NOT NULL,
+      EmployeeName TEXT NOT NULL,
+      DepartmentID INTEGER,
+      Designation TEXT,
+      LocationID INTEGER,
+      Mobile TEXT,
+      Email TEXT NOT NULL,
+      JoiningDate TEXT,
+      Birthday TEXT,
+      WorkAnniversary TEXT,
+      ManagerID INTEGER,
+      ProfilePhoto TEXT,
+      Status TEXT DEFAULT 'Active',
+      IsDeleted INTEGER DEFAULT 0,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Users (
+      UserID INTEGER PRIMARY KEY AUTOINCREMENT,
+      CompanyID INTEGER NOT NULL,
+      EmployeeID INTEGER,
+      Username TEXT NOT NULL UNIQUE,
+      Email TEXT NOT NULL UNIQUE,
+      PasswordHash TEXT NOT NULL,
+      RoleID INTEGER NOT NULL,
+      Status TEXT DEFAULT 'Active',
+      LastLoginAt TEXT,
+      FailedLoginAttempts INTEGER DEFAULT 0,
+      LockoutUntil TEXT,
+      IsDeleted INTEGER DEFAULT 0,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS ImportantDateCategories (
+      CategoryID INTEGER PRIMARY KEY AUTOINCREMENT,
+      CompanyID INTEGER,
+      CategoryName TEXT NOT NULL,
+      ColorCode TEXT DEFAULT '#3b82f6',
+      IconName TEXT DEFAULT 'Calendar',
+      IsSystemDefault INTEGER DEFAULT 0,
+      Status TEXT DEFAULT 'Active',
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS ImportantDates (
+      ImportantDateID INTEGER PRIMARY KEY AUTOINCREMENT,
+      CompanyID INTEGER NOT NULL,
+      LocationID INTEGER,
+      DepartmentID INTEGER,
+      CategoryID INTEGER NOT NULL,
+      Title TEXT NOT NULL,
+      Description TEXT,
+      RelatedEmployeeID INTEGER,
+      RelatedVendor TEXT,
+      RelatedCustomer TEXT,
+      ReferenceNumber TEXT,
+      Date TEXT NOT NULL,
+      StartDate TEXT,
+      ExpiryDate TEXT,
+      RecurrenceType TEXT DEFAULT 'Does Not Repeat',
+      ResponsibleEmployeeID INTEGER,
+      Priority TEXT DEFAULT 'Medium',
+      Attachment TEXT,
+      Notes TEXT,
+      AutoGenerateTask INTEGER DEFAULT 0,
+      LeadDaysForTask INTEGER DEFAULT 15,
+      TaskAssignedToID INTEGER,
+      GeneratedTaskID INTEGER,
+      Status TEXT DEFAULT 'Active',
+      IsDeleted INTEGER DEFAULT 0,
+      CreatedBy INTEGER,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedBy INTEGER,
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS ImportantDateReminders (
+      ReminderID INTEGER PRIMARY KEY AUTOINCREMENT,
+      ImportantDateID INTEGER NOT NULL,
+      DaysBefore INTEGER NOT NULL,
+      ReminderChannel TEXT DEFAULT 'In-App',
+      IsCustomDate INTEGER DEFAULT 0,
+      CustomDate TEXT,
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS ImportantDateHistory (
+      HistoryID INTEGER PRIMARY KEY AUTOINCREMENT,
+      ImportantDateID INTEGER NOT NULL,
+      PreviousExpiryDate TEXT NOT NULL,
+      NewExpiryDate TEXT NOT NULL,
+      RenewedDate TEXT NOT NULL,
+      RenewedByUserID INTEGER,
+      Remarks TEXT,
+      AttachmentURL TEXT,
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskCategories (
+      CategoryID INTEGER PRIMARY KEY AUTOINCREMENT,
+      CompanyID INTEGER,
+      CategoryName TEXT NOT NULL,
+      ColorCode TEXT DEFAULT '#10b981',
+      RequiresApproval INTEGER DEFAULT 0,
+      Status TEXT DEFAULT 'Active',
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Tasks (
+      TaskID INTEGER PRIMARY KEY AUTOINCREMENT,
+      TaskNumber TEXT NOT NULL UNIQUE,
+      CompanyID INTEGER NOT NULL,
+      LocationID INTEGER,
+      DepartmentID INTEGER,
+      CategoryID INTEGER,
+      TaskTitle TEXT NOT NULL,
+      TaskDescription TEXT,
+      AssignedByID INTEGER NOT NULL,
+      ManagerID INTEGER,
+      StartDate TEXT,
+      DueDate TEXT NOT NULL,
+      Priority TEXT DEFAULT 'Medium',
+      Status TEXT DEFAULT 'New',
+      PercentageComplete INTEGER DEFAULT 0,
+      EstimatedHours REAL DEFAULT 0.0,
+      ActualHours REAL DEFAULT 0.0,
+      ParentTaskID INTEGER,
+      RelatedImportantDateID INTEGER,
+      RelatedEmployeeID INTEGER,
+      RelatedVendor TEXT,
+      RelatedCustomer TEXT,
+      Tags TEXT,
+      CompletedDate TEXT,
+      ApprovedByID INTEGER,
+      ApprovedDate TEXT,
+      RejectionReason TEXT,
+      IsDeleted INTEGER DEFAULT 0,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskAssignees (
+      TaskID INTEGER NOT NULL,
+      EmployeeID INTEGER NOT NULL,
+      AssignedAt TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (TaskID, EmployeeID)
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskChecklist (
+      ChecklistItemID INTEGER PRIMARY KEY AUTOINCREMENT,
+      TaskID INTEGER NOT NULL,
+      Title TEXT NOT NULL,
+      IsCompleted INTEGER DEFAULT 0,
+      CompletedAt TEXT,
+      CompletedByEmployeeID INTEGER,
+      SortOrder INTEGER DEFAULT 0,
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskUpdates (
+      UpdateID INTEGER PRIMARY KEY AUTOINCREMENT,
+      TaskID INTEGER NOT NULL,
+      EmployeeID INTEGER,
+      PreviousStatus TEXT,
+      NewStatus TEXT,
+      PreviousProgress INTEGER,
+      NewProgress INTEGER,
+      TimeSpentHours REAL DEFAULT 0.0,
+      Remarks TEXT NOT NULL,
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskComments (
+      CommentID INTEGER PRIMARY KEY AUTOINCREMENT,
+      TaskID INTEGER NOT NULL,
+      UserID INTEGER NOT NULL,
+      CommentText TEXT NOT NULL,
+      MentionedUserIDs TEXT,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskAttachments (
+      AttachmentID INTEGER PRIMARY KEY AUTOINCREMENT,
+      TaskID INTEGER,
+      ImportantDateID INTEGER,
+      CommentID INTEGER,
+      FileName TEXT NOT NULL,
+      OriginalName TEXT NOT NULL,
+      FileType TEXT NOT NULL,
+      FileSize INTEGER NOT NULL,
+      StoragePath TEXT NOT NULL,
+      UploadedByUserID INTEGER NOT NULL,
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskActivityLog (
+      ActivityID INTEGER PRIMARY KEY AUTOINCREMENT,
+      TaskID INTEGER NOT NULL,
+      UserID INTEGER NOT NULL,
+      ActionType TEXT NOT NULL,
+      FieldName TEXT,
+      OldValue TEXT,
+      NewValue TEXT,
+      Description TEXT,
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TaskTemplates (
+      TemplateID INTEGER PRIMARY KEY AUTOINCREMENT,
+      CompanyID INTEGER NOT NULL,
+      DepartmentID INTEGER,
+      CategoryID INTEGER,
+      TemplateName TEXT NOT NULL,
+      Description TEXT,
+      EstimatedHours REAL DEFAULT 0.0,
+      Priority TEXT DEFAULT 'Medium',
+      ChecklistJSON TEXT,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS RecurringTasks (
+      RecurringTaskID INTEGER PRIMARY KEY AUTOINCREMENT,
+      CompanyID INTEGER NOT NULL,
+      DepartmentID INTEGER,
+      LocationID INTEGER,
+      CategoryID INTEGER,
+      TaskTitle TEXT NOT NULL,
+      TaskDescription TEXT,
+      AssignedToEmployeeID INTEGER,
+      AssignedByID INTEGER NOT NULL,
+      Priority TEXT DEFAULT 'Medium',
+      RecurrencePattern TEXT NOT NULL,
+      Interval INTEGER DEFAULT 1,
+      DaysOfWeek TEXT,
+      DayOfMonth INTEGER,
+      EstimatedHours REAL DEFAULT 0.0,
+      StartDate TEXT NOT NULL,
+      EndDate TEXT,
+      LastGeneratedDate TEXT,
+      NextDueDate TEXT NOT NULL,
+      IsActive INTEGER DEFAULT 1,
+      ChecklistJSON TEXT,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS ReminderRules (
+      RuleID INTEGER PRIMARY KEY AUTOINCREMENT,
+      CompanyID INTEGER NOT NULL,
+      RuleName TEXT NOT NULL,
+      TargetType TEXT NOT NULL,
+      DaysOffset INTEGER NOT NULL,
+      Channel TEXT DEFAULT 'In-App',
+      IsActive INTEGER DEFAULT 1,
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS EscalationRules (
+      EscalationID INTEGER PRIMARY KEY AUTOINCREMENT,
+      CompanyID INTEGER NOT NULL,
+      DaysOverdue INTEGER NOT NULL,
+      EscalateToRole TEXT NOT NULL,
+      Channel TEXT DEFAULT 'In-App',
+      IsActive INTEGER DEFAULT 1,
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Notifications (
+      NotificationID INTEGER PRIMARY KEY AUTOINCREMENT,
+      UserID INTEGER NOT NULL,
+      Title TEXT NOT NULL,
+      Message TEXT NOT NULL,
+      Type TEXT NOT NULL,
+      ReferenceType TEXT,
+      ReferenceID INTEGER,
+      IsRead INTEGER DEFAULT 0,
+      ReadAt TEXT,
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS NotificationLog (
+      LogID INTEGER PRIMARY KEY AUTOINCREMENT,
+      IdempotencyKey TEXT NOT NULL UNIQUE,
+      NotificationType TEXT NOT NULL,
+      RecipientUserID INTEGER NOT NULL,
+      Channel TEXT NOT NULL,
+      SentAt TEXT DEFAULT (datetime('now')),
+      Status TEXT DEFAULT 'Sent'
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS AuditLogs (
+      AuditID INTEGER PRIMARY KEY AUTOINCREMENT,
+      UserID INTEGER,
+      Username TEXT,
+      Action TEXT NOT NULL,
+      EntityName TEXT NOT NULL,
+      EntityID INTEGER,
+      OldValues TEXT,
+      NewValues TEXT,
+      IPAddress TEXT,
+      UserAgent TEXT,
+      CreatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS Tenants (
+      TenantID INTEGER PRIMARY KEY AUTOINCREMENT,
+      TenantCode TEXT UNIQUE NOT NULL,
+      TenantName TEXT NOT NULL,
+      LegalName TEXT,
+      ContactPerson TEXT,
+      ContactEmail TEXT NOT NULL,
+      ContactMobile TEXT,
+      Industry TEXT,
+      Address TEXT,
+      City TEXT,
+      State TEXT,
+      Country TEXT DEFAULT 'India',
+      PINCode TEXT,
+      Website TEXT,
+      GSTIN TEXT,
+      PAN TEXT,
+      Logo TEXT,
+      SubscriptionTier TEXT DEFAULT 'Standard',
+      MaxCompanies INTEGER DEFAULT 5,
+      MaxUsers INTEGER DEFAULT 50,
+      LicenseStartDate TEXT,
+      LicenseEndDate TEXT,
+      EnabledModules TEXT DEFAULT '["tasks","dates","calendar","reports","audit"]',
+      Status TEXT DEFAULT 'Pending',
+      IsDeleted INTEGER DEFAULT 0,
+      CreatedBy INTEGER,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedBy INTEGER,
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS TenantRegistrations (
+      RegistrationID INTEGER PRIMARY KEY AUTOINCREMENT,
+      TenantID INTEGER,
+      RegistrationToken TEXT UNIQUE NOT NULL,
+      TokenExpiresAt TEXT NOT NULL,
+      CompanyName TEXT NOT NULL,
+      LegalName TEXT,
+      ContactPerson TEXT NOT NULL,
+      ContactEmail TEXT NOT NULL,
+      ContactMobile TEXT,
+      Address TEXT,
+      City TEXT,
+      State TEXT,
+      Country TEXT DEFAULT 'India',
+      PINCode TEXT,
+      GSTIN TEXT,
+      PAN TEXT,
+      Website TEXT,
+      Industry TEXT,
+      CompanyType TEXT DEFAULT 'Subsidiary',
+      NumBranches INTEGER DEFAULT 1,
+      NumUsers INTEGER DEFAULT 10,
+      RequestedModules TEXT,
+      AdminName TEXT,
+      AdminEmail TEXT,
+      AdminUsername TEXT,
+      PasswordHash TEXT,
+      Status TEXT DEFAULT 'Pending',
+      RejectionReason TEXT,
+      ReviewedBy INTEGER,
+      ReviewedAt TEXT,
+      Notes TEXT,
+      CreatedAt TEXT DEFAULT (datetime('now')),
+      UpdatedAt TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Run column migrations for SQLite
+  const tryAddCol = async (table: string, colDef: string) => {
+    try {
+      await runSql(`ALTER TABLE ${table} ADD COLUMN ${colDef}`);
+    } catch {}
+  };
+  await tryAddCol('Companies', 'ParentCompanyID INTEGER');
+  await tryAddCol('Companies', 'CompanyCode TEXT');
+  await tryAddCol('Companies', 'LegalName TEXT');
+  await tryAddCol('Companies', 'CompanyType TEXT DEFAULT "Subsidiary"');
+  await tryAddCol('Companies', 'EnabledModules TEXT DEFAULT \'["tasks","dates","calendar","reports","audit"]\'');
+  await tryAddCol('Companies', 'SubscriptionTier TEXT DEFAULT "Enterprise"');
+  await tryAddCol('Companies', 'MaxUsers INTEGER DEFAULT 100');
+  await tryAddCol('AuditLogs', 'CompanyID INTEGER');
+
+  // Multi-tenant column migrations
+  await tryAddCol('Companies', 'TenantID INTEGER');
+  await tryAddCol('Users', 'TenantID INTEGER');
+  await tryAddCol('Users', 'IsPlatformAdmin INTEGER DEFAULT 0');
+  await tryAddCol('Users', 'MustChangePassword INTEGER DEFAULT 0');
+  await tryAddCol('Roles', 'TenantID INTEGER');
+  await tryAddCol('Roles', 'IsPlatformRole INTEGER DEFAULT 0');
+  await tryAddCol('Employees', 'TenantID INTEGER');
+  await tryAddCol('AuditLogs', 'TenantID INTEGER');
+
+  const checkUserComp = await new Promise<any[]>((res) => {
+    sqliteDb!.all(`SELECT * FROM UserCompany LIMIT 1`, (err, rows) => res(rows || []));
+  });
+
+  if (checkUserComp.length === 0) {
+    console.log('[Database] Seeding multi-tenant company hierarchy into SQLite...');
+
+    // Clean & Seed Multi-Company Hierarchy
+    await runSql(`DELETE FROM Companies;`);
+    await runSql(`
+      INSERT INTO Companies (CompanyID, ParentCompanyID, CompanyCode, CompanyName, LegalName, CompanyType, ShortName, City, State, Status, EnabledModules, SubscriptionTier, MaxUsers)
+      VALUES 
+      (1, NULL, 'ABC-GRP', 'ABC Group Holdings Ltd', 'ABC Group Holdings International Pvt Ltd', 'Holding', 'ABCGroup', 'Mumbai', 'Maharashtra', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Enterprise', 500),
+      (2, 1, 'ABC-HTL', 'ABC Hotels & Resorts Pvt Ltd', 'ABC Hospitality Group India Ltd', 'Subsidiary', 'ABCHotels', 'Dehradun', 'Uttarakhand', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Enterprise', 200),
+      (3, 2, 'HTL-DDN', 'ABC Hotel — Dehradun Mall Road', 'ABC Hotel Dehradun Unit', 'Branch', 'HotelDDN', 'Dehradun', 'Uttarakhand', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Professional', 50),
+      (4, 2, 'HTL-RSH', 'ABC Hotel & Spa — Rishikesh Ganga', 'ABC Hotel Rishikesh Unit', 'Branch', 'HotelRSH', 'Rishikesh', 'Uttarakhand', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Professional', 50),
+      (5, 1, 'ABC-RTL', 'ABC Retail Ventures Pvt Ltd', 'ABC Consumer Retail India Pvt Ltd', 'Subsidiary', 'ABCRetail', 'New Delhi', 'Delhi', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Enterprise', 200),
+      (6, 5, 'RTL-DEL', 'ABC Store — Connaught Place Delhi', 'ABC Retail Delhi Store #1', 'Branch', 'StoreDEL', 'New Delhi', 'Delhi', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Standard', 30),
+      (7, 5, 'RTL-NOI', 'ABC Store — Sector 18 Noida', 'ABC Retail Noida Store #2', 'Branch', 'StoreNOI', 'Noida', 'Uttar Pradesh', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Standard', 30),
+      (8, NULL, 'ZEN-GRP', 'Zenith Enterprises Global Ltd', 'Zenith Multi-Enterprise Corp', 'Holding', 'ZenithCorp', 'Bengaluru', 'Karnataka', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Enterprise', 500),
+      (9, 8, 'ZEN-MUM', 'Zenith Cloud Tech Mumbai', 'Zenith Cloud Technologies Mumbai Ltd', 'Subsidiary', 'ZenithMUM', 'Mumbai', 'Maharashtra', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Professional', 100),
+      (10, 8, 'ZEN-BLR', 'Zenith Cloud Tech Bengaluru', 'Zenith Cloud Technologies Bengaluru Ltd', 'Subsidiary', 'ZenithBLR', 'Bengaluru', 'Karnataka', 'Active', '["tasks","dates","calendar","reports","audit"]', 'Professional', 100);
+    `);
+
+    // Ensure Roles exist
+    await runSql(`DELETE FROM Roles;`);
+    await runSql(`
+      INSERT INTO Roles (RoleID, RoleName, Description, IsSystemRole)
+      VALUES 
+      (1, 'Super Admin', 'Full SaaS enterprise platform access across all companies', 1),
+      (2, 'Group Admin', 'Manages holding company and all recursive subsidiaries & branches', 1),
+      (3, 'Company Head', 'Manages single subsidiary company and its branch locations', 1),
+      (4, 'Department Manager', 'Creates, assigns, and approves department tasks', 1),
+      (5, 'Employee', 'Updates assigned tasks, uploads remarks and checklists', 1),
+      (6, 'Viewer', 'Read-only access to dashboards, tasks, and calendar', 1);
+    `);
+
+    // Seed UserCompany mappings
+    await runSql(`DELETE FROM UserCompany;`);
+    await runSql(`
+      INSERT INTO UserCompany (UserID, CompanyID, RoleID, AccessScope, IsPrimary, IsActive)
+      VALUES
+      (1, 1, 1, 'Global', 1, 1),
+      (1, 2, 1, 'Global', 0, 1),
+      (1, 3, 1, 'Global', 0, 1),
+      (1, 4, 1, 'Global', 0, 1),
+      (1, 5, 1, 'Global', 0, 1),
+      (1, 6, 1, 'Global', 0, 1),
+      (1, 7, 1, 'Global', 0, 1),
+      (1, 8, 1, 'Global', 0, 1),
+      (1, 9, 1, 'Global', 0, 1),
+      (1, 10, 1, 'Global', 0, 1),
+      (2, 1, 2, 'Hierarchy', 1, 1),
+      (3, 1, 2, 'Hierarchy', 1, 1),
+      (4, 1, 4, 'Hierarchy', 1, 1),
+      (5, 3, 5, 'Own', 1, 1),
+      (6, 6, 5, 'Own', 1, 1),
+      (7, 3, 5, 'Own', 1, 1),
+      (8, 2, 4, 'Hierarchy', 1, 1),
+      (9, 5, 4, 'Hierarchy', 1, 1),
+      (10, 1, 6, 'Own', 1, 1);
+    `);
+
+    await runSql(`DELETE FROM Locations;`);
+    await runSql(`DELETE FROM Departments;`);
+    await runSql(`DELETE FROM Employees;`);
+    await runSql(`DELETE FROM Users;`);
+    await runSql(`DELETE FROM ImportantDates;`);
+    await runSql(`DELETE FROM Tasks;`);
+    await runSql(`DELETE FROM TaskAssignees;`);
+    await runSql(`DELETE FROM TaskChecklist;`);
+    await runSql(`DELETE FROM TaskTemplates;`);
+    await runSql(`DELETE FROM ReminderRules;`);
+    await runSql(`DELETE FROM EscalationRules;`);
+    await runSql(`DELETE FROM ImportantDateCategories;`);
+    await runSql(`DELETE FROM TaskCategories;`);
+    await runSql(`DELETE FROM RolePermissions;`);
+
+    await runSql(`
+      INSERT INTO Locations (LocationID, CompanyID, LocationCode, LocationName, Address, City, State, ContactPerson, Phone, Email, Status)
+      VALUES 
+      (1, 1, 'LOC-MUM', 'Headquarters - Mumbai', 'Cyber One, BKC', 'Mumbai', 'Maharashtra', 'Rajesh Sharma', '+91 98200 11223', 'mumbai@apexcorp.com', 'Active'),
+      (2, 1, 'LOC-BLR', 'Tech Hub - Bangalore', 'Outer Ring Road, Bellandur', 'Bangalore', 'Karnataka', 'Vikram Rao', '+91 98450 22334', 'bangalore@apexcorp.com', 'Active'),
+      (3, 1, 'LOC-DEL', 'Regional Office - Delhi', 'Connaught Place', 'New Delhi', 'Delhi', 'Ananya Gupta', '+91 98110 33445', 'delhi@apexcorp.com', 'Active');
+    `);
+
+    await runSql(`
+      INSERT INTO Departments (DepartmentID, CompanyID, DepartmentCode, DepartmentName, Status)
+      VALUES 
+      (1, 1, 'DEPT-IT', 'Information Technology', 'Active'),
+      (2, 1, 'DEPT-ACC', 'Accounts & Finance', 'Active'),
+      (3, 1, 'DEPT-HR', 'Human Resources', 'Active'),
+      (4, 1, 'DEPT-PUR', 'Purchase & Procurement', 'Active'),
+      (5, 1, 'DEPT-OPS', 'Operations & Maintenance', 'Active');
+    `);
+
+    await runSql(`
+      INSERT INTO Roles (RoleID, RoleName, Description, IsSystemRole)
+      VALUES 
+      (1, 'Super Admin', 'Full enterprise system access with administrative rights', 1),
+      (2, 'Company Admin', 'Manages company settings, masters, tasks, and reports', 1),
+      (3, 'Management', 'Reviews all tasks, dashboard analytics, and approvals', 1),
+      (4, 'Department Manager', 'Creates, assigns, and approves department tasks', 1),
+      (5, 'Employee', 'Updates assigned tasks, uploads remarks and checklists', 1),
+      (6, 'Viewer', 'Read-only access to dashboards, tasks, and calendar', 1);
+    `);
+
+    await runSql(`
+      INSERT INTO Permissions (PermissionID, PermissionCode, ModuleName, Description)
+      VALUES
+      (1, 'tasks.view', 'Tasks', 'View tasks list and details'),
+      (2, 'tasks.create', 'Tasks', 'Create new tasks'),
+      (3, 'tasks.edit', 'Tasks', 'Edit task details'),
+      (4, 'tasks.delete', 'Tasks', 'Delete or archive tasks'),
+      (5, 'tasks.assign', 'Tasks', 'Assign tasks to employees'),
+      (6, 'tasks.update_progress', 'Tasks', 'Update task progress and remarks'),
+      (7, 'tasks.approve', 'Tasks', 'Approve or reject completed tasks'),
+      (8, 'tasks.bulk_actions', 'Tasks', 'Perform bulk task operations'),
+      (9, 'dates.view', 'Important Dates', 'View important dates and calendars'),
+      (10, 'dates.create', 'Important Dates', 'Create important dates'),
+      (11, 'dates.edit', 'Important Dates', 'Edit and update important dates'),
+      (12, 'dates.renew', 'Important Dates', 'Renew expiring dates'),
+      (13, 'dates.delete', 'Important Dates', 'Delete important dates'),
+      (14, 'masters.manage', 'Masters', 'Manage companies, departments, locations, employees'),
+      (15, 'roles.manage', 'Security', 'Manage roles and permissions'),
+      (16, 'reports.view', 'Reports', 'View task and date reports'),
+      (17, 'reports.export', 'Reports', 'Export reports to Excel and PDF'),
+      (18, 'audit.view', 'Audit', 'View system audit history'),
+      (19, 'settings.manage', 'Settings', 'Manage system rules and integrations');
+    `);
+
+    for (let p = 1; p <= 19; p++) {
+      await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (1, ${p}), (2, ${p});`);
+    }
+    for (const p of [1, 2, 3, 5, 6, 7, 9, 10, 11, 12, 16, 17]) {
+      await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (4, ${p});`);
+    }
+    for (const p of [1, 5, 7, 9, 16, 17]) {
+      await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (3, ${p});`);
+    }
+    for (const p of [1, 6, 9]) {
+      await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (5, ${p});`);
+    }
+    for (const p of [1, 9, 16]) {
+      await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (6, ${p});`);
+    }
+
+    // 10 Employees
+    await runSql(`
+      INSERT INTO Employees (EmployeeID, CompanyID, EmployeeCode, EmployeeName, DepartmentID, Designation, LocationID, Mobile, Email, JoiningDate, Birthday, WorkAnniversary, Status)
+      VALUES
+      (1, 1, 'EMP-001', 'Suresh Menon', 1, 'Director & Head of IT', 1, '+91 98201 11001', 'suresh.menon@apexcorp.com', '2018-04-15', '1982-08-30', '2018-04-15', 'Active'),
+      (2, 1, 'EMP-002', 'Pooja Sharma', 2, 'Finance Controller', 1, '+91 98201 11002', 'pooja.sharma@apexcorp.com', '2019-06-01', '1985-09-12', '2019-06-01', 'Active'),
+      (3, 1, 'EMP-003', 'Amit Patel', 1, 'Senior DevOps & Systems Lead', 2, '+91 98450 11003', 'amit.patel@apexcorp.com', '2020-01-10', '1988-10-05', '2020-01-10', 'Active'),
+      (4, 1, 'EMP-004', 'Rahul Verma', 1, 'Database & Security Admin', 1, '+91 98201 11004', 'rahul.verma@apexcorp.com', '2021-03-15', '1992-09-02', '2021-03-15', 'Active'),
+      (5, 1, 'EMP-005', 'Neha Kulkarni', 2, 'Senior Accounts Executive', 1, '+91 98201 11005', 'neha.kulkarni@apexcorp.com', '2021-07-20', '1991-11-25', '2021-07-20', 'Active'),
+      (6, 1, 'EMP-006', 'Rohan Deshmukh', 5, 'Facilities & Maintenance Lead', 1, '+91 98201 11006', 'rohan.deshmukh@apexcorp.com', '2019-11-01', '1987-12-14', '2019-11-01', 'Active'),
+      (7, 1, 'EMP-007', 'Sneha Nair', 3, 'HR & Compliance Manager', 2, '+91 98450 11007', 'sneha.nair@apexcorp.com', '2020-08-15', '1990-04-18', '2020-08-15', 'Active'),
+      (8, 1, 'EMP-008', 'Vikram Malhotra', 4, 'Procurement Manager', 3, '+91 98110 11008', 'vikram.malhotra@apexcorp.com', '2020-02-01', '1986-07-08', '2020-02-01', 'Active'),
+      (9, 1, 'EMP-009', 'Ananya Sen', 3, 'Talent Acquisition Specialist', 2, '+91 98450 11009', 'ananya.sen@apexcorp.com', '2022-05-10', '1994-02-28', '2022-05-10', 'Active'),
+      (10, 1, 'EMP-010', 'Karan Mehra', 5, 'Safety & Security Officer', 3, '+91 98110 11010', 'karan.mehra@apexcorp.com', '2022-09-01', '1993-06-17', '2022-09-01', 'Active');
+    `);
+
+    // Users — generate a real bcrypt hash for the demo password
+    const pwdHash = bcrypt.hashSync('Password@123', 10);
+    await runSql(`
+      INSERT INTO Users (UserID, CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status)
+      VALUES
+      (1, 1, 1, 'admin@company.com', 'admin@company.com', '${pwdHash}', 1, 'Active'),
+      (2, 1, 2, 'finance.admin@company.com', 'finance.admin@company.com', '${pwdHash}', 2, 'Active'),
+      (3, 1, 1, 'management@company.com', 'management@company.com', '${pwdHash}', 3, 'Active'),
+      (4, 1, 3, 'manager.it@company.com', 'manager.it@company.com', '${pwdHash}', 4, 'Active'),
+      (5, 1, 4, 'employee.rahul@company.com', 'employee.rahul@company.com', '${pwdHash}', 5, 'Active'),
+      (6, 1, 5, 'employee.neha@company.com', 'employee.neha@company.com', '${pwdHash}', 5, 'Active'),
+      (7, 1, 6, 'employee.rohan@company.com', 'employee.rohan@company.com', '${pwdHash}', 5, 'Active'),
+      (8, 1, 7, 'manager.hr@company.com', 'manager.hr@company.com', '${pwdHash}', 4, 'Active'),
+      (9, 1, 8, 'manager.purchase@company.com', 'manager.purchase@company.com', '${pwdHash}', 4, 'Active'),
+      (10, 1, NULL, 'viewer@company.com', 'viewer@company.com', '${pwdHash}', 6, 'Active');
+    `);
+
+    const dateCats = [
+      ['Employee Birthday', '#ec4899', 'Cake'],
+      ['Employee Work Anniversary', '#f59e0b', 'Award'],
+      ['Company Anniversary', '#8b5cf6', 'PartyPopper'],
+      ['Contract Expiry', '#ef4444', 'FileText'],
+      ['AMC Expiry', '#3b82f6', 'Wrench'],
+      ['Warranty Expiry', '#06b6d4', 'ShieldAlert'],
+      ['Insurance Expiry', '#10b981', 'ShieldCheck'],
+      ['License Renewal', '#6366f1', 'FileCheck'],
+      ['Registration Renewal', '#84cc16', 'BookmarkCheck'],
+      ['Agreement Expiry', '#f97316', 'FileSignature'],
+      ['Lease Expiry', '#a855f7', 'Building2'],
+      ['Payment Due Date', '#e11d48', 'CreditCard'],
+      ['Vendor Follow-up', '#0284c7', 'PhoneCall'],
+      ['Customer Follow-up', '#059669', 'Users'],
+      ['Compliance Date', '#dc2626', 'Scale'],
+      ['Tax Date', '#d97706', 'Receipt'],
+      ['Audit Date', '#7c3aed', 'ClipboardCheck'],
+      ['Maintenance Date', '#475569', 'Hammer'],
+      ['Subscription Renewal', '#2563eb', 'RefreshCw'],
+      ['Domain Renewal', '#0891b2', 'Globe'],
+      ['Software License Renewal', '#4f46e5', 'Key'],
+      ['Custom Event', '#64748b', 'Tag'],
+    ];
+
+    for (const [name, color, icon] of dateCats) {
+      await runSql(`INSERT INTO ImportantDateCategories (CompanyID, CategoryName, ColorCode, IconName, IsSystemDefault, Status) VALUES (1, '${name}', '${color}', '${icon}', 1, 'Active')`);
+    }
+
+    await runSql(`
+      INSERT INTO TaskCategories (CategoryID, CompanyID, CategoryName, ColorCode, RequiresApproval, Status)
+      VALUES 
+      (1, 1, 'Infrastructure & Maintenance', '#3b82f6', 1, 'Active'),
+      (2, 1, 'Compliance & Legal', '#ef4444', 1, 'Active'),
+      (3, 1, 'Financial & Auditing', '#10b981', 1, 'Active'),
+      (4, 1, 'HR & Onboarding', '#f59e0b', 0, 'Active'),
+      (5, 1, 'Vendor & Procurement', '#8b5cf6', 1, 'Active'),
+      (6, 1, 'Daily Operations', '#64748b', 0, 'Active');
+    `);
+
+    await runSql(`
+      INSERT INTO ImportantDates (ImportantDateID, CompanyID, LocationID, DepartmentID, CategoryID, Title, Description, RelatedVendor, ReferenceNumber, Date, StartDate, ExpiryDate, RecurrenceType, ResponsibleEmployeeID, Priority, AutoGenerateTask, LeadDaysForTask, TaskAssignedToID, Status, CreatedBy)
+      VALUES
+      (1, 1, 1, 5, 5, 'CCTV & Security Surveillance AMC Renewal', 'Annual maintenance contract for 128 IP Cameras and Central NVR system at Mumbai HQ.', 'SecureTech Solutions India', 'AMC-SEC-2025-99', '2026-09-08', '2025-09-08', '2026-09-08', 'Yearly', 6, 'Critical', 1, 15, 6, 'Active', 1),
+      (2, 1, 1, 2, 7, 'Corporate Fleet & Asset Insurance Renewal', 'Comprehensive commercial insurance covering corporate vehicle fleet and DG sets.', 'HDFC ERGO General Insurance', 'POL-FLEET-88214', '2026-09-15', '2025-09-15', '2026-09-15', 'Yearly', 2, 'High', 1, 30, 2, 'Active', 1),
+      (3, 1, 1, 1, 20, 'ApexCorp.com Primary Domain & SSL Renewal', 'DigiCert Wildcard SSL and Cloudflare Enterprise registrar domain renewal.', 'Cloudflare Inc', 'DOM-APEX-2026', '2026-09-04', '2025-09-04', '2026-09-04', 'Yearly', 3, 'Critical', 1, 10, 3, 'Active', 1),
+      (4, 1, 1, 2, 16, 'GSTR-3B Monthly Tax Return Filing', 'Monthly filing and tax settlement for GST obligations.', 'GST Portal India', 'GST-MUM-SEP-26', '2026-09-20', '2026-09-01', '2026-09-20', 'Monthly', 2, 'High', 1, 7, 2, 'Active', 1),
+      (5, 1, 1, 1, 17, 'ISO 27001 Information Security Surveillance Audit', 'Annual Stage 2 surveillance audit by BSI auditors for ISO/IEC 27001:2022.', 'BSI Group India', 'AUD-ISO-27001-26', '2026-09-25', '2026-09-25', '2026-09-26', 'Yearly', 3, 'High', 1, 20, 3, 'Active', 1),
+      (6, 1, 1, 3, 1, 'Rahul Verma Birthday Celebration', 'Team birthday greetings and virtual gift voucher dispatch.', NULL, 'BDAY-EMP-004', '2026-09-02', '2026-09-02', '2026-09-02', 'Yearly', 4, 'Low', 0, 1, NULL, 'Active', 1),
+      (7, 1, 1, 1, 21, 'Microsoft 365 Enterprise E5 Licenses', '150 Seats Microsoft 365 E5 subscription renewal through CSP partner.', 'Redington India Ltd', 'MSFT-CSP-7712', '2026-10-15', '2025-10-15', '2026-10-15', 'Yearly', 3, 'Medium', 1, 30, 3, 'Active', 1),
+      (8, 1, 1, 5, 15, 'Maharashtra Fire Safety NOC Renewal', 'Annual fire department inspection, hydrant test certificate, and NOC renewal.', 'Fire Dept Mumbai Suburbs', 'NOC-FIRE-2025-41', '2026-09-01', '2025-09-01', '2026-09-01', 'Yearly', 6, 'Critical', 1, 15, 6, 'Active', 1);
+    `);
+
+    await runSql(`
+      INSERT INTO Tasks (TaskID, TaskNumber, CompanyID, LocationID, DepartmentID, CategoryID, TaskTitle, TaskDescription, AssignedByID, ManagerID, StartDate, DueDate, Priority, Status, PercentageComplete, EstimatedHours, ActualHours, CompletedDate)
+      VALUES
+      (1, 'TSK-2026-0001', 1, 1, 1, 1, 'Disaster Recovery & Offsite Database Backup Verification', 'Perform quarterly test restoration of SQL Server production backups into staging isolated cluster.', 1, 3, '2026-08-25', '2026-08-31', 'Critical', 'Overdue', 60, 8.0, 5.5, NULL),
+      (2, 'TSK-2026-0002', 1, 1, 1, 1, 'ApexCorp.com Primary SSL Certificate Rotation', 'Update Cloudflare edge certificates and verify HTTPS strict transport security headers across all endpoints.', 1, 3, '2026-09-01', '2026-09-02', 'Critical', 'In Progress', 75, 4.0, 3.0, NULL),
+      (3, 'TSK-2026-0003', 1, 1, 5, 1, 'CCTV AMC Vendor Contract Negotiation & SLA Sign-off', 'Review revised AMC quote with 2-hour SLA response for critical camera feeds and NVR redundancy.', 1, 6, '2026-09-01', '2026-09-06', 'High', 'In Progress', 40, 6.0, 2.5, NULL),
+      (4, 'TSK-2026-0004', 1, 1, 2, 3, 'August 2026 Bank Reconciliation & Ledger Closing', 'Reconcile HDFC, ICICI, and Kotak main operational accounts. Match all inbound wire credits and tax deductions.', 1, 5, '2026-08-28', '2026-09-03', 'High', 'Waiting for Approval', 100, 12.0, 11.0, NULL),
+      (5, 'TSK-2026-0005', 1, 1, 3, 4, 'Q3 Workplace Safety Training & Ergonomics Workshop', 'Conduct live and recorded safety awareness sessions for all Bangalore and Mumbai branch team members.', 1, 7, '2026-08-15', '2026-08-30', 'Medium', 'Completed', 100, 16.0, 15.5, '2026-08-29 17:30:00'),
+      (6, 'TSK-2026-0006', 1, 1, 2, 3, 'Prepare GSTR-3B Tax Filing Worksheets for September', 'Gather output GST liability and input tax credit invoices from tally ERP for monthly filing.', 1, 5, '2026-09-05', '2026-09-18', 'High', 'New', 0, 10.0, 0.0, NULL),
+      (7, 'TSK-2026-0007', 1, 1, 1, 2, 'ISO 27001 Access Control & Privilege Audit Preparation', 'Export active directory and database user privilege lists; verify quarterly access revocation logs.', 1, 3, '2026-09-02', '2026-09-22', 'High', 'In Progress', 35, 14.0, 4.0, NULL),
+      (8, 'TSK-2026-0008', 1, 1, 4, 5, 'Annual Dell Server Hardware Upgrade Procurement', 'Awaiting final board budget sign-off for replacement of 3 Hyper-V cluster host nodes.', 1, 8, '2026-08-20', '2026-09-15', 'Medium', 'On Hold', 20, 20.0, 4.0, NULL),
+      (9, 'TSK-2026-0009', 1, 1, 5, 1, 'Diesel Generator (DG Set) Fuel Level & Load Test', 'Conduct monthly 30-minute full-load test on 500kVA Cummins generator.', 1, 6, '2026-09-01', '2026-09-03', 'Medium', 'In Progress', 50, 3.0, 1.5, NULL),
+      (10, 'TSK-2026-0010', 1, 1, 1, 1, 'Network Firewall Firmware Patch 7.4.2 Deployment', 'Apply security vulnerability patch to Fortinet HA cluster during midnight maintenance window.', 1, 3, '2026-09-02', '2026-09-04', 'Critical', 'Pending', 10, 4.0, 0.5, NULL),
+      (11, 'TSK-2026-0011', 1, 1, 3, 4, 'Quarterly Employee Performance Review Cycle Launch', 'Distribute 360-degree self-appraisal forms to all team leads in HR portal.', 1, 7, '2026-09-05', '2026-09-25', 'Medium', 'New', 0, 15.0, 0.0, NULL),
+      (12, 'TSK-2026-0012', 1, 1, 2, 3, 'Vendor TDS Deduction Certificates (Form 16A) Dispatch', 'Generate and mail Q1 Form 16A certificates to registered vendor accounts.', 1, 5, '2026-08-20', '2026-09-10', 'Medium', 'In Progress', 80, 8.0, 6.0, NULL),
+      (13, 'TSK-2026-0013', 1, 1, 5, 2, 'Annual Fire Extinguisher Refill & Inspection', 'Hydro-test and refill 45 ABC dry powder and CO2 extinguishers across all 3 floors.', 1, 6, '2026-08-28', '2026-09-01', 'High', 'Overdue', 25, 6.0, 2.0, NULL),
+      (14, 'TSK-2026-0014', 1, 1, 1, 6, 'Review End-user Antivirus & Patch Compliance Report', 'Verify Crowdstrike Falcon EDR sensor health across 240 employee laptops.', 1, 4, '2026-09-02', '2026-09-05', 'Medium', 'In Progress', 60, 5.0, 3.0, NULL),
+      (15, 'TSK-2026-0015', 1, 1, 4, 5, 'Stationery & Office Consumables Bi-Monthly Order', 'Consolidate department requests and issue PO to approved supplier.', 1, 8, '2026-09-01', '2026-09-07', 'Low', 'Pending', 0, 4.0, 0.0, NULL);
+    `);
+
+    await runSql(`
+      INSERT INTO TaskAssignees (TaskID, EmployeeID)
+      VALUES 
+      (1, 4), (1, 3), (2, 3), (3, 6), (4, 5), (5, 7), (6, 5), (7, 4), (8, 8), (9, 6), (10, 3), (11, 7), (12, 5), (13, 6), (14, 4), (15, 8);
+    `);
+
+    await runSql(`
+      INSERT INTO TaskChecklist (TaskID, Title, IsCompleted, SortOrder)
+      VALUES 
+      (1, 'Verify latest differential backup file integrity in AWS S3 Glacier', 1, 1),
+      (1, 'Spin up staging RDS SQL Server instance from backup snapshot', 1, 2),
+      (1, 'Execute automated data integrity DBCC CHECKDB script', 1, 3),
+      (1, 'Test core application read/write transactions against restored DB', 0, 4),
+      (1, 'Sign off Disaster Recovery restoration audit log', 0, 5),
+      (2, 'Generate 4096-bit RSA CSR for apexcorp.com and wildcard subdomains', 1, 1),
+      (2, 'Submit verification through DNS TXT token challenge', 1, 2),
+      (2, 'Upload signed PEM certificates to Cloudflare SSL management', 1, 3),
+      (2, 'Run SSL Labs Qualys scanner to ensure A+ rating and HSTS validity', 0, 4);
+    `);
+
+    await runSql(`
+      INSERT INTO TaskUpdates (TaskID, EmployeeID, PreviousStatus, NewStatus, PreviousProgress, NewProgress, TimeSpentHours, Remarks)
+      VALUES (1, 4, 'In Progress', 'In Progress', 30, 60, 3.5, 'Successfully restored the 450GB DB snapshot into the staging cluster. Running DBCC CHECKDB currently.');
+    `);
+
+    await runSql(`
+      INSERT INTO TaskComments (TaskID, UserID, CommentText)
+      VALUES (1, 1, 'Please ensure this is completed before the ISO audit on the 25th. Excellent progress.');
+    `);
+
+    await runSql(`
+      INSERT INTO TaskTemplates (TemplateID, CompanyID, DepartmentID, CategoryID, TemplateName, Description, EstimatedHours, Priority, ChecklistJSON)
+      VALUES 
+      (1, 1, 1, 1, 'Monthly IT Infrastructure Checklist', 'Standard recurring monthly health check for all core servers, firewalls, backups, and security endpoints.', 6.0, 'High', '["Verify Active Directory replication status","Run antivirus health audit on all endpoints","Check SAN storage space thresholds","Test offsite backup restore in sandbox","Review firewall drop logs for anomalies","Verify UPS battery self-test log"]'),
+      (2, 1, 2, 3, 'Monthly Financial Closing Checklist', 'End of month financial reconciliation and compliance checklist.', 12.0, 'High', '["Reconcile all operational bank statements","Verify vendor payment vouchers and GST input invoices","Calculate employee TDS deductions","Generate monthly P&L and Balance Sheet draft","Archive petty cash expense receipts"]');
+    `);
+
+    await runSql(`
+      INSERT INTO ReminderRules (RuleID, CompanyID, RuleName, TargetType, DaysOffset, Channel, IsActive)
+      VALUES
+      (1, 1, '30 Days Advance Notice', 'ImportantDate', -30, 'In-App', 1),
+      (2, 1, '15 Days Advance Notice', 'ImportantDate', -15, 'In-App', 1),
+      (3, 1, '7 Days Advance Notice', 'Both', -7, 'In-App', 1),
+      (4, 1, '3 Days Urgent Notice', 'Both', -3, 'In-App', 1),
+      (5, 1, '1 Day Final Warning', 'Both', -1, 'In-App', 1),
+      (6, 1, 'On Due Date Alert', 'Both', 0, 'In-App', 1);
+    `);
+
+    await runSql(`
+      INSERT INTO EscalationRules (EscalationID, CompanyID, DaysOverdue, EscalateToRole, Channel, IsActive)
+      VALUES
+      (1, 1, 1, 'Employee', 'In-App', 1),
+      (2, 1, 2, 'Department Manager', 'In-App', 1),
+      (3, 1, 5, 'Management', 'In-App', 1),
+      (4, 1, 10, 'Super Admin', 'In-App', 1);
+    `);
+
+    console.log('[Database] Seed completed successfully.');
+  }
+
+  // Multi-tenant migration: seed default tenant and platform admin if not yet present
+  const tenantCheck = await new Promise<any[]>((res) => {
+    sqliteDb!.all(`SELECT TenantID FROM Tenants LIMIT 1`, (err, rows) => res(rows || []));
+  });
+
+  if (tenantCheck.length === 0) {
+    console.log('[Database] Seeding multi-tenant platform data...');
+
+    // 1. Create default tenant for all existing data
+    await runSql(`
+      INSERT INTO Tenants (TenantID, TenantCode, TenantName, LegalName, ContactPerson, ContactEmail, Industry, City, State, Country, SubscriptionTier, MaxCompanies, MaxUsers, LicenseStartDate, LicenseEndDate, EnabledModules, Status)
+      VALUES (1, 'DEFAULT', 'Default Organization', 'Default Organization Pvt Ltd', 'System Admin', 'admin@company.com', 'Technology', 'Mumbai', 'Maharashtra', 'India', 'Enterprise', 100, 1000, '2025-01-01', '2030-12-31', '["tasks","dates","calendar","reports","audit"]', 'Active')
+    `);
+
+    // 2. Backfill TenantID = 1 on all existing records
+    await runSql(`UPDATE Companies SET TenantID = 1 WHERE TenantID IS NULL`);
+    await runSql(`UPDATE Users SET TenantID = 1 WHERE TenantID IS NULL`);
+    await runSql(`UPDATE Employees SET TenantID = 1 WHERE TenantID IS NULL`);
+    await runSql(`UPDATE AuditLogs SET TenantID = 1 WHERE TenantID IS NULL`);
+
+    // 3. Add "Platform Admin" role if not exists
+    const platformRoleCheck = await new Promise<any[]>((res) => {
+      sqliteDb!.all(`SELECT RoleID FROM Roles WHERE RoleName = 'Platform Admin' LIMIT 1`, (err, rows) => res(rows || []));
+    });
+    if (platformRoleCheck.length === 0) {
+      await runSql(`INSERT INTO Roles (RoleName, Description, IsSystemRole, IsPlatformRole) VALUES ('Platform Admin', 'Full platform access across all tenants and companies', 1, 1)`);
+    }
+
+    // 4. Get the Platform Admin role ID
+    const platformRole = await new Promise<any[]>((res) => {
+      sqliteDb!.all(`SELECT RoleID FROM Roles WHERE RoleName = 'Platform Admin' LIMIT 1`, (err, rows) => res(rows || []));
+    });
+    const platformRoleId = platformRole.length > 0 ? platformRole[0].RoleID : 7;
+
+    // 5. Grant all permissions to Platform Admin role
+    const allPerms = await new Promise<any[]>((res) => {
+      sqliteDb!.all(`SELECT PermissionID FROM Permissions`, (err, rows) => res(rows || []));
+    });
+    for (const perm of allPerms) {
+      try {
+        await runSql(`INSERT INTO RolePermissions (RoleID, PermissionID) VALUES (${platformRoleId}, ${perm.PermissionID})`);
+      } catch {}
+    }
+
+    // 6. Create Platform Super Admin user (sverpadmin) if not exists
+    const platformUserCheck = await new Promise<any[]>((res) => {
+      sqliteDb!.all(`SELECT UserID FROM Users WHERE Username = 'sverpadmin' LIMIT 1`, (err, rows) => res(rows || []));
+    });
+    if (platformUserCheck.length === 0) {
+      const platformPassword = process.env.PLATFORM_ADMIN_PASSWORD || 'PlatformAdmin@2026!';
+      const salt = bcrypt.genSaltSync(12);
+      const platformPwdHash = bcrypt.hashSync(platformPassword, salt);
+      await runSql(`
+        INSERT INTO Users (CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status, TenantID, IsPlatformAdmin, MustChangePassword)
+        VALUES (1, NULL, 'sverpadmin', 'platform@erp-system.com', '${platformPwdHash}', ${platformRoleId}, 'Active', NULL, 1, 1)
+      `);
+      console.log('[Database] Platform Super Admin (sverpadmin) created. Password sourced from PLATFORM_ADMIN_PASSWORD env var.');
+    }
+
+    console.log('[Database] Multi-tenant platform data seeded successfully.');
+  }
+
+  // Fix demo account password hashes: replace the old placeholder hash with a real bcrypt hash
+  const oldFakeHash = '$2a$10$PjJbv9V0q5o1yv6d3mC44.yN7eU/rZ5L1vJqfQvV9B1o0W0s1p1r.';
+  const usersWithFakeHash = await new Promise<any[]>((res) => {
+    sqliteDb!.all(`SELECT UserID FROM Users WHERE PasswordHash = ?`, [oldFakeHash], (err, rows) => res(rows || []));
+  });
+  if (usersWithFakeHash.length > 0) {
+    const realHash = bcrypt.hashSync('Password@123', 10);
+    await new Promise<void>((resolve, reject) => {
+      sqliteDb!.run(`UPDATE Users SET PasswordHash = ? WHERE PasswordHash = ?`, [realHash, oldFakeHash], (err) => {
+        if (err) reject(err); else resolve();
+      });
+    });
+    console.log(`[Database] Fixed ${usersWithFakeHash.length} user(s) with invalid password hashes.`);
+  }
+}
+
+/**
+ * Robust replacement for DATEDIFF(day, arg1, arg2)
+ */
+function replaceDateDiff(sql: string): string {
+  let result = '';
+  let i = 0;
+  while (i < sql.length) {
+    const diffIdx = sql.toUpperCase().indexOf('DATEDIFF(DAY,', i);
+    if (diffIdx === -1) {
+      result += sql.substring(i);
+      break;
+    }
+    result += sql.substring(i, diffIdx);
+    // Find matching parenthesis
+    let startArg = diffIdx + 'DATEDIFF(DAY,'.length;
+    let depth = 1;
+    let currentArg = '';
+    const args: string[] = [];
+    let j = startArg;
+    while (j < sql.length && depth > 0) {
+      const char = sql[j];
+      if (char === '(') depth++;
+      else if (char === ')') depth--;
+
+      if ((char === ',' && depth === 1) || (char === ')' && depth === 0)) {
+        args.push(currentArg.trim());
+        currentArg = '';
+      } else {
+        currentArg += char;
+      }
+      j++;
+    }
+
+    if (args.length >= 2) {
+      const arg1 = args[0];
+      const arg2 = args[1];
+      result += `(CAST(round(julianday(${arg2}) - julianday(${arg1})) AS INTEGER))`;
+    } else {
+      result += sql.substring(diffIdx, j);
+    }
+    i = j;
+  }
+  return result;
+}
+
+/**
+ * Translates SQL Server T-SQL dialect to ANSI/SQLite when in SQLite mode
+ */
+function translateQueryForSqlite(queryText: string, params: Record<string, any>): { sql: string; values: any[] } {
+  let q = queryText;
+
+  // 1. Remove dbo. prefix
+  q = q.replace(/dbo\./g, '');
+
+  // 2. Handle TOP N queries: SELECT TOP 10 ... -> SELECT ... LIMIT 10
+  let limitFromTop: number | null = null;
+  q = q.replace(/SELECT\s+TOP\s+(\d+)/i, (match, count) => {
+    limitFromTop = parseInt(count, 10);
+    return 'SELECT';
+  });
+
+  // 3. Clean built-ins & Unicode literals
+  q = q.replace(/N'([^']*)'/g, "'$1'");
+  q = q.replace(/CAST\(GETDATE\(\) AS DATE\)/gi, `date('now')`);
+  q = q.replace(/GETDATE\(\)/gi, `date('now')`);
+  q = q.replace(/SYSUTCDATETIME\(\)/gi, `datetime('now')`);
+  q = q.replace(/ISNULL\(/gi, `COALESCE(`);
+
+  // 4. Parse DATEDIFF(day, a, b)
+  q = replaceDateDiff(q);
+
+  // Handle DATEADD(day, N, date)
+  q = q.replace(/DATEADD\(day,\s*([^,]+),\s*([^)]+)\)/gi, (match, p1, p2) => {
+    return `date(${p2.trim()}, '+' || ${p1.trim()} || ' days')`;
+  });
+
+  // Clean remaining CAST(... AS DATE) or DECIMAL
+  q = q.replace(/CAST\(([^)]+)\s+AS\s+DATE\)/gi, `date($1)`);
+  q = q.replace(/CAST\(([^)]+)\s+AS\s+DECIMAL\([^)]+\)\)/gi, `ROUND($1, 1)`);
+
+  // Group Concat & Output
+  q = q.replace(/STRING_AGG\(([^,]+),\s*'([^']+)'\)/gi, `GROUP_CONCAT($1, '$2')`);
+  q = q.replace(/OUTPUT INSERTED\.(\w+)/gi, ``);
+
+  // Pagination syntax: OFFSET @offset ROWS FETCH NEXT @limitNum ROWS ONLY -> LIMIT @limitNum OFFSET @offset
+  const offsetMatch = q.match(/OFFSET\s+@offset\s+ROWS\s+FETCH\s+NEXT\s+@limitNum\s+ROWS\s+ONLY/i);
+  if (offsetMatch) {
+    q = q.replace(offsetMatch[0], `LIMIT @limitNum OFFSET @offset`);
+  } else if (limitFromTop !== null && !q.toUpperCase().includes('LIMIT')) {
+    q += ` LIMIT ${limitFromTop}`;
+  }
+
+  // Extract named parameters into positional ?
+  const paramValues: any[] = [];
+  const paramMatches = q.match(/@(\w+)/g);
+  if (paramMatches) {
+    for (const match of paramMatches) {
+      const paramName = match.substring(1);
+      if (params.hasOwnProperty(paramName)) {
+        paramValues.push(params[paramName]);
+      } else {
+        paramValues.push(null);
+      }
+    }
+  }
+
+  q = q.replace(/@\w+/g, '?');
+
+  return { sql: q, values: paramValues };
+}
+
+/**
+ * Universal Query Execution (Supports both SQL Server and SQLite)
+ */
+export async function executeQuery<T = any>(
+  queryText: string,
+  params: Record<string, any> = {}
+): Promise<{ recordset: T[]; rowsAffected: number[] }> {
+  await getDbPool();
+
+  if (activeEngine === 'mssql' && mssqlPool && mssqlPool.connected) {
+    const request = mssqlPool.request();
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null) {
+        request.input(key, sql.NVarChar, null);
+      } else if (typeof value === 'number') {
+        if (Number.isInteger(value)) {
+          request.input(key, sql.Int, value);
+        } else {
+          request.input(key, sql.Decimal(10, 2), value);
+        }
+      } else if (typeof value === 'boolean') {
+        request.input(key, sql.Bit, value ? 1 : 0);
+      } else if (value instanceof Date) {
+        request.input(key, sql.DateTime2, value);
+      } else {
+        request.input(key, sql.NVarChar, String(value));
+      }
+    }
+    const result = await request.query<T>(queryText);
+    return { recordset: result.recordset, rowsAffected: result.rowsAffected };
+  } else {
+    // Execute on SQLite
+    const { sql: translatedSql, values } = translateQueryForSqlite(queryText, params);
+
+    return new Promise((resolve, reject) => {
+      const isSelect = translatedSql.trim().toUpperCase().startsWith('SELECT');
+
+      if (isSelect) {
+        sqliteDb!.all(translatedSql, values, (err, rows: any) => {
+          if (err) {
+            console.error('[SQLite Query Error]:', err.message, '\nSQL:', translatedSql);
+            return reject(err);
+          }
+          const mappedRows = (rows || []).map((row: any) => {
+            const newRow: any = { ...row };
+            for (const key of Object.keys(newRow)) {
+              if (
+                (key.endsWith('Date') || key.endsWith('At')) &&
+                typeof newRow[key] === 'string' &&
+                newRow[key].match(/^\d{4}-\d{2}-\d{2}/)
+              ) {
+                newRow[key] = new Date(newRow[key]);
+              }
+            }
+            return newRow;
+          });
+          resolve({ recordset: mappedRows as T[], rowsAffected: [mappedRows.length] });
+        });
+      } else {
+        sqliteDb!.run(translatedSql, values, function (this: sqlite3.RunResult, err: Error | null) {
+          if (err) {
+            console.error('[SQLite Exec Error]:', err.message, '\nSQL:', translatedSql);
+            return reject(err);
+          }
+          const recordset: any[] = [];
+          if (this.lastID) {
+            recordset.push({
+              CompanyID: this.lastID,
+              UserCompanyID: this.lastID,
+              TaskID: this.lastID,
+              ImportantDateID: this.lastID,
+              EmployeeID: this.lastID,
+              UserID: this.lastID,
+              LocationID: this.lastID,
+              DepartmentID: this.lastID,
+              CategoryID: this.lastID,
+              TemplateID: this.lastID,
+              CommentID: this.lastID,
+              AttachmentID: this.lastID,
+              ActivityID: this.lastID,
+              TenantID: this.lastID,
+              RegistrationID: this.lastID,
+            });
+          }
+          resolve({ recordset: recordset as T[], rowsAffected: [this.changes] });
+        });
+      }
+    });
+  }
+}
+
+export { sql };
+export default { getDbPool, executeQuery, sql };
