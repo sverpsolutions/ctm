@@ -1850,6 +1850,60 @@ function replaceDateDiff(sql) {
     }
     return result;
 }
+function replaceDateAddSqlite(sqlStr) {
+    let result = '';
+    let i = 0;
+    while (i < sqlStr.length) {
+        const addIdx = sqlStr.toUpperCase().indexOf('DATEADD(', i);
+        if (addIdx === -1) {
+            result += sqlStr.substring(i);
+            break;
+        }
+        result += sqlStr.substring(i, addIdx);
+        let startArg = addIdx + 'DATEADD('.length;
+        let depth = 1;
+        let currentArg = '';
+        const args = [];
+        let j = startArg;
+        while (j < sqlStr.length && depth > 0) {
+            const char = sqlStr[j];
+            if (char === '(')
+                depth++;
+            else if (char === ')')
+                depth--;
+            if ((char === ',' && depth === 1) || (char === ')' && depth === 0)) {
+                args.push(currentArg.trim());
+                currentArg = '';
+            }
+            else {
+                currentArg += char;
+            }
+            j++;
+        }
+        if (args.length >= 3) {
+            const unit = args[0].toUpperCase();
+            const interval = args[1];
+            const dateExpr = args[2];
+            let modifier = 'days';
+            if (unit.includes('MINUTE') || unit === 'MI' || unit === 'N')
+                modifier = 'minutes';
+            else if (unit.includes('HOUR') || unit === 'HH')
+                modifier = 'hours';
+            else if (unit.includes('MONTH') || unit === 'M' || unit === 'MM')
+                modifier = 'months';
+            else if (unit.includes('YEAR') || unit === 'YY' || unit === 'YYYY')
+                modifier = 'years';
+            else if (unit.includes('SECOND') || unit === 'SS' || unit === 'S')
+                modifier = 'seconds';
+            result += `datetime(${dateExpr}, '+' || ${interval} || ' ${modifier}')`;
+        }
+        else {
+            result += sqlStr.substring(addIdx, j);
+        }
+        i = j;
+    }
+    return result;
+}
 /**
  * Translates SQL Server T-SQL dialect to MySQL/MariaDB
  */
@@ -1873,10 +1927,8 @@ function translateQueryForMysql(queryText, params) {
     q = q.replace(/ISNULL\(/gi, 'IFNULL(');
     // DATEDIFF(day, a, b) → DATEDIFF(b, a) — MySQL DATEDIFF returns days, args reversed
     q = replaceDateDiffMysql(q);
-    // DATEADD(day, N, date) → DATE_ADD(date, INTERVAL N DAY)
-    q = q.replace(/DATEADD\(day,\s*([^,]+),\s*([^)]+)\)/gi, (match, interval, dateExpr) => {
-        return `DATE_ADD(${dateExpr.trim()}, INTERVAL ${interval.trim()} DAY)`;
-    });
+    // DATEADD(unit, N, date) → DATE_ADD(date, INTERVAL N unit) with parenthesis-depth parsing
+    q = replaceDateAddMysql(q);
     // CAST(x AS DATE)
     q = q.replace(/CAST\(([^)]+)\s+AS\s+DATE\)/gi, 'DATE($1)');
     q = q.replace(/CAST\(([^)]+)\s+AS\s+DECIMAL\(([^)]+)\)\)/gi, 'CAST($1 AS DECIMAL($2))');
@@ -1908,6 +1960,60 @@ function translateQueryForMysql(queryText, params) {
     }
     q = q.replace(/@\w+/g, '?');
     return { sql: q, values: paramValues };
+}
+function replaceDateAddMysql(sqlStr) {
+    let result = '';
+    let i = 0;
+    while (i < sqlStr.length) {
+        const addIdx = sqlStr.toUpperCase().indexOf('DATEADD(', i);
+        if (addIdx === -1) {
+            result += sqlStr.substring(i);
+            break;
+        }
+        result += sqlStr.substring(i, addIdx);
+        let startArg = addIdx + 'DATEADD('.length;
+        let depth = 1;
+        let currentArg = '';
+        const args = [];
+        let j = startArg;
+        while (j < sqlStr.length && depth > 0) {
+            const char = sqlStr[j];
+            if (char === '(')
+                depth++;
+            else if (char === ')')
+                depth--;
+            if ((char === ',' && depth === 1) || (char === ')' && depth === 0)) {
+                args.push(currentArg.trim());
+                currentArg = '';
+            }
+            else {
+                currentArg += char;
+            }
+            j++;
+        }
+        if (args.length >= 3) {
+            const unit = args[0].toUpperCase();
+            const interval = args[1];
+            const dateExpr = args[2];
+            let intervalUnit = 'DAY';
+            if (unit.includes('MINUTE') || unit === 'MI' || unit === 'N')
+                intervalUnit = 'MINUTE';
+            else if (unit.includes('HOUR') || unit === 'HH')
+                intervalUnit = 'HOUR';
+            else if (unit.includes('MONTH') || unit === 'M' || unit === 'MM')
+                intervalUnit = 'MONTH';
+            else if (unit.includes('YEAR') || unit === 'YY' || unit === 'YYYY')
+                intervalUnit = 'YEAR';
+            else if (unit.includes('SECOND') || unit === 'SS' || unit === 'S')
+                intervalUnit = 'SECOND';
+            result += `DATE_ADD(${dateExpr}, INTERVAL ${interval} ${intervalUnit})`;
+        }
+        else {
+            result += sqlStr.substring(addIdx, j);
+        }
+        i = j;
+    }
+    return result;
 }
 function replaceDateDiffMysql(sqlStr) {
     let result = '';
@@ -1971,10 +2077,8 @@ function translateQueryForSqlite(queryText, params) {
     q = q.replace(/ISNULL\(/gi, `COALESCE(`);
     // 4. Parse DATEDIFF(day, a, b)
     q = replaceDateDiff(q);
-    // Handle DATEADD(day, N, date)
-    q = q.replace(/DATEADD\(day,\s*([^,]+),\s*([^)]+)\)/gi, (match, p1, p2) => {
-        return `date(${p2.trim()}, '+' || ${p1.trim()} || ' days')`;
-    });
+    // Handle DATEADD(unit, N, date) with parenthesis-depth parsing
+    q = replaceDateAddSqlite(q);
     // Clean remaining CAST(... AS DATE) or DECIMAL
     q = q.replace(/CAST\(([^)]+)\s+AS\s+DATE\)/gi, `date($1)`);
     q = q.replace(/CAST\(([^)]+)\s+AS\s+DECIMAL\([^)]+\)\)/gi, `ROUND($1, 1)`);
