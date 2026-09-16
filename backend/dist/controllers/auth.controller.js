@@ -13,8 +13,9 @@ const jwt_1 = require("../config/jwt");
 const audit_service_1 = require("../services/audit.service");
 async function login(req, res, next) {
     try {
-        const { usernameOrEmail, password } = req.body;
-        if (!usernameOrEmail || !password) {
+        const ident = (req.body.usernameOrEmail || req.body.username || req.body.email || req.body.identifier || '').toString().trim();
+        const { password } = req.body;
+        if (!ident || !password) {
             res.status(400).json({ success: false, message: 'Username/email and password are required.' });
             return;
         }
@@ -31,7 +32,7 @@ async function login(req, res, next) {
        LEFT JOIN dbo.Employees e ON u.EmployeeID = e.EmployeeID
        LEFT JOIN dbo.Departments d ON e.DepartmentID = d.DepartmentID
        LEFT JOIN dbo.Companies c ON u.CompanyID = c.CompanyID
-       WHERE (u.Username = @ident OR u.Email = @ident OR e.EmployeeCode = @ident) AND u.IsDeleted = 0`, { ident: usernameOrEmail.trim() });
+       WHERE (u.Username = @ident OR u.Email = @ident OR e.EmployeeCode = @ident) AND u.IsDeleted = 0`, { ident });
         if (userResult.recordset.length === 0) {
             res.status(401).json({ success: false, message: 'Invalid credentials or user account does not exist.' });
             return;
