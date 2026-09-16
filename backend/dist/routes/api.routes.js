@@ -171,6 +171,8 @@ router.get('/masters/departments', mastCtrl.getDepartments);
 router.post('/masters/departments', (0, rbac_middleware_1.requirePermission)('masters.manage'), mastCtrl.createDepartment);
 router.get('/masters/employees', mastCtrl.getEmployees);
 router.post('/masters/employees', (0, rbac_middleware_1.requirePermission)('masters.manage'), mastCtrl.createEmployee);
+router.put('/masters/employees/:id', (0, rbac_middleware_1.requirePermission)('masters.manage'), mastCtrl.updateEmployee);
+router.delete('/masters/employees/:id', (0, rbac_middleware_1.requirePermission)('masters.manage'), mastCtrl.deleteEmployee);
 router.get('/masters/roles', mastCtrl.getRolesAndPermissions);
 router.put('/masters/roles/:roleId/permissions', (0, rbac_middleware_1.requirePermission)('roles.manage'), mastCtrl.updateRolePermissions);
 router.get('/masters/users', mastCtrl.getUsers);

@@ -11,6 +11,8 @@ exports.getDepartments = getDepartments;
 exports.createDepartment = createDepartment;
 exports.getEmployees = getEmployees;
 exports.createEmployee = createEmployee;
+exports.updateEmployee = updateEmployee;
+exports.deleteEmployee = deleteEmployee;
 exports.getRolesAndPermissions = getRolesAndPermissions;
 exports.updateRolePermissions = updateRolePermissions;
 exports.getUsers = getUsers;
@@ -288,6 +290,97 @@ async function createEmployee(req, res, next) {
             req,
         });
         res.status(201).json({ success: true, message: 'Employee created successfully.', employeeId: newEmpId });
+    }
+    catch (err) {
+        next(err);
+    }
+}
+async function updateEmployee(req, res, next) {
+    try {
+        const employeeId = parseInt(req.params.id, 10);
+        const userId = req.user.userId;
+        const { employeeCode, employeeName, departmentId, designation, locationId, mobile, email, joiningDate, birthday, workAnniversary, managerId, roleId, status, password, } = req.body;
+        if (!employeeName || !email) {
+            res.status(400).json({ success: false, message: 'Employee name and email are required.' });
+            return;
+        }
+        await (0, db_1.executeQuery)(`UPDATE dbo.Employees SET
+        EmployeeCode = @employeeCode,
+        EmployeeName = @employeeName,
+        DepartmentID = @departmentId,
+        Designation = @designation,
+        LocationID = @locationId,
+        Mobile = @mobile,
+        Email = @email,
+        JoiningDate = @joiningDate,
+        Birthday = @birthday,
+        WorkAnniversary = @workAnniversary,
+        ManagerID = @managerId,
+        Status = ISNULL(@status, Status),
+        UpdatedAt = SYSUTCDATETIME()
+       WHERE EmployeeID = @employeeId AND IsDeleted = 0`, {
+            employeeId,
+            employeeCode: employeeCode ? employeeCode.trim() : null,
+            employeeName: employeeName.trim(),
+            departmentId: departmentId ? parseInt(departmentId, 10) : null,
+            designation: designation || null,
+            locationId: locationId ? parseInt(locationId, 10) : null,
+            mobile: mobile || null,
+            email: email.trim(),
+            joiningDate: joiningDate || null,
+            birthday: birthday || null,
+            workAnniversary: workAnniversary || null,
+            managerId: managerId ? parseInt(managerId, 10) : null,
+            status: status || null,
+        });
+        // If roleId provided, update linked User account
+        if (roleId) {
+            await (0, db_1.executeQuery)(`UPDATE dbo.Users SET
+          RoleID = @roleId,
+          Email = @email,
+          UpdatedAt = SYSUTCDATETIME()
+         WHERE EmployeeID = @employeeId AND IsDeleted = 0`, { employeeId, roleId: parseInt(roleId, 10), email: email.trim() });
+            await (0, db_1.executeQuery)(`UPDATE dbo.UserCompany SET
+          RoleID = @roleId
+         WHERE UserID IN (SELECT UserID FROM dbo.Users WHERE EmployeeID = @employeeId)`, { employeeId, roleId: parseInt(roleId, 10) });
+        }
+        // Optional password reset
+        if (password && password.trim()) {
+            const salt = await bcryptjs_1.default.genSalt(10);
+            const passwordHash = await bcryptjs_1.default.hash(password.trim(), salt);
+            await (0, db_1.executeQuery)(`UPDATE dbo.Users SET
+          PasswordHash = @passwordHash,
+          UpdatedAt = SYSUTCDATETIME()
+         WHERE EmployeeID = @employeeId AND IsDeleted = 0`, { employeeId, passwordHash });
+        }
+        await (0, audit_service_1.logAudit)({
+            userId,
+            action: 'UPDATE_EMPLOYEE',
+            entityName: 'Employees',
+            entityId: employeeId,
+            newValues: { employeeCode, employeeName, email, designation, roleId },
+            req,
+        });
+        res.json({ success: true, message: 'Employee updated successfully.' });
+    }
+    catch (err) {
+        next(err);
+    }
+}
+async function deleteEmployee(req, res, next) {
+    try {
+        const employeeId = parseInt(req.params.id, 10);
+        const userId = req.user.userId;
+        await (0, db_1.executeQuery)(`UPDATE dbo.Employees SET IsDeleted = 1, Status = 'Inactive', UpdatedAt = SYSUTCDATETIME() WHERE EmployeeID = @employeeId`, { employeeId });
+        await (0, db_1.executeQuery)(`UPDATE dbo.Users SET IsDeleted = 1, Status = 'Inactive', UpdatedAt = SYSUTCDATETIME() WHERE EmployeeID = @employeeId`, { employeeId });
+        await (0, audit_service_1.logAudit)({
+            userId,
+            action: 'DELETE_EMPLOYEE',
+            entityName: 'Employees',
+            entityId: employeeId,
+            req,
+        });
+        res.json({ success: true, message: 'Employee deleted successfully.' });
     }
     catch (err) {
         next(err);

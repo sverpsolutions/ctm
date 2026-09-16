@@ -341,6 +341,141 @@ export async function createEmployee(req: Request, res: Response, next: NextFunc
   }
 }
 
+export async function updateEmployee(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const employeeId = parseInt(req.params.id, 10);
+    const userId = req.user!.userId;
+    const {
+      employeeCode,
+      employeeName,
+      departmentId,
+      designation,
+      locationId,
+      mobile,
+      email,
+      joiningDate,
+      birthday,
+      workAnniversary,
+      managerId,
+      roleId,
+      status,
+      password,
+    } = req.body;
+
+    if (!employeeName || !email) {
+      res.status(400).json({ success: false, message: 'Employee name and email are required.' });
+      return;
+    }
+
+    await executeQuery(
+      `UPDATE dbo.Employees SET
+        EmployeeCode = @employeeCode,
+        EmployeeName = @employeeName,
+        DepartmentID = @departmentId,
+        Designation = @designation,
+        LocationID = @locationId,
+        Mobile = @mobile,
+        Email = @email,
+        JoiningDate = @joiningDate,
+        Birthday = @birthday,
+        WorkAnniversary = @workAnniversary,
+        ManagerID = @managerId,
+        Status = ISNULL(@status, Status),
+        UpdatedAt = SYSUTCDATETIME()
+       WHERE EmployeeID = @employeeId AND IsDeleted = 0`,
+      {
+        employeeId,
+        employeeCode: employeeCode ? employeeCode.trim() : null,
+        employeeName: employeeName.trim(),
+        departmentId: departmentId ? parseInt(departmentId, 10) : null,
+        designation: designation || null,
+        locationId: locationId ? parseInt(locationId, 10) : null,
+        mobile: mobile || null,
+        email: email.trim(),
+        joiningDate: joiningDate || null,
+        birthday: birthday || null,
+        workAnniversary: workAnniversary || null,
+        managerId: managerId ? parseInt(managerId, 10) : null,
+        status: status || null,
+      }
+    );
+
+    // If roleId provided, update linked User account
+    if (roleId) {
+      await executeQuery(
+        `UPDATE dbo.Users SET
+          RoleID = @roleId,
+          Email = @email,
+          UpdatedAt = SYSUTCDATETIME()
+         WHERE EmployeeID = @employeeId AND IsDeleted = 0`,
+        { employeeId, roleId: parseInt(roleId, 10), email: email.trim() }
+      );
+
+      await executeQuery(
+        `UPDATE dbo.UserCompany SET
+          RoleID = @roleId
+         WHERE UserID IN (SELECT UserID FROM dbo.Users WHERE EmployeeID = @employeeId)`,
+        { employeeId, roleId: parseInt(roleId, 10) }
+      );
+    }
+
+    // Optional password reset
+    if (password && password.trim()) {
+      const salt = await bcrypt.genSalt(10);
+      const passwordHash = await bcrypt.hash(password.trim(), salt);
+      await executeQuery(
+        `UPDATE dbo.Users SET
+          PasswordHash = @passwordHash,
+          UpdatedAt = SYSUTCDATETIME()
+         WHERE EmployeeID = @employeeId AND IsDeleted = 0`,
+        { employeeId, passwordHash }
+      );
+    }
+
+    await logAudit({
+      userId,
+      action: 'UPDATE_EMPLOYEE',
+      entityName: 'Employees',
+      entityId: employeeId,
+      newValues: { employeeCode, employeeName, email, designation, roleId },
+      req,
+    });
+
+    res.json({ success: true, message: 'Employee updated successfully.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteEmployee(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const employeeId = parseInt(req.params.id, 10);
+    const userId = req.user!.userId;
+
+    await executeQuery(
+      `UPDATE dbo.Employees SET IsDeleted = 1, Status = 'Inactive', UpdatedAt = SYSUTCDATETIME() WHERE EmployeeID = @employeeId`,
+      { employeeId }
+    );
+
+    await executeQuery(
+      `UPDATE dbo.Users SET IsDeleted = 1, Status = 'Inactive', UpdatedAt = SYSUTCDATETIME() WHERE EmployeeID = @employeeId`,
+      { employeeId }
+    );
+
+    await logAudit({
+      userId,
+      action: 'DELETE_EMPLOYEE',
+      entityName: 'Employees',
+      entityId: employeeId,
+      req,
+    });
+
+    res.json({ success: true, message: 'Employee deleted successfully.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // --- ROLES & PERMISSIONS ---
 export async function getRolesAndPermissions(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {

@@ -155,6 +155,8 @@ router.post('/masters/departments', requirePermission('masters.manage'), mastCtr
 
 router.get('/masters/employees', mastCtrl.getEmployees);
 router.post('/masters/employees', requirePermission('masters.manage'), mastCtrl.createEmployee);
+router.put('/masters/employees/:id', requirePermission('masters.manage'), mastCtrl.updateEmployee);
+router.delete('/masters/employees/:id', requirePermission('masters.manage'), mastCtrl.deleteEmployee);
 
 router.get('/masters/roles', mastCtrl.getRolesAndPermissions);
 router.put('/masters/roles/:roleId/permissions', requirePermission('roles.manage'), mastCtrl.updateRolePermissions);

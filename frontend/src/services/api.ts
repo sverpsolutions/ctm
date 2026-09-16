@@ -272,6 +272,14 @@ export const mastersApi = {
     const res = await api.post('/masters/employees', data);
     return res.data;
   },
+  updateEmployee: async (id: number, data: any) => {
+    const res = await api.put(`/masters/employees/${id}`, data);
+    return res.data;
+  },
+  deleteEmployee: async (id: number) => {
+    const res = await api.delete(`/masters/employees/${id}`);
+    return res.data;
+  },
   getRoles: async (): Promise<{ data: { roles: Role[]; permissions: Permission[]; rolePermissions: { RoleID: number; PermissionID: number }[] } }> => {
     const res = await api.get('/masters/roles');
     return res.data;
