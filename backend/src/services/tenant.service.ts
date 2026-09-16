@@ -85,11 +85,10 @@ export class TenantService {
       `SELECT 
         c.CompanyID, c.ParentCompanyID, c.CompanyCode, c.CompanyName, c.LegalName,
         c.CompanyType, c.Status, c.EnabledModules, c.SubscriptionTier, c.MaxUsers,
-        (SELECT COUNT(DISTINCT UserID) FROM (
-          SELECT u.UserID FROM dbo.Users u WHERE u.CompanyID = c.CompanyID AND u.IsDeleted = 0
-          UNION
-          SELECT uc.UserID FROM dbo.UserCompany uc JOIN dbo.Users u2 ON uc.UserID = u2.UserID WHERE uc.CompanyID = c.CompanyID AND uc.IsActive = 1 AND u2.IsDeleted = 0
-        ) AS all_u) AS UserCount,
+        (SELECT COUNT(DISTINCT u.UserID) 
+         FROM dbo.Users u 
+         LEFT JOIN dbo.UserCompany uc ON u.UserID = uc.UserID AND uc.IsActive = 1
+         WHERE (u.CompanyID = c.CompanyID OR uc.CompanyID = c.CompanyID) AND u.IsDeleted = 0) AS UserCount,
         (SELECT COUNT(*) FROM dbo.Tasks t WHERE t.CompanyID = c.CompanyID AND t.IsDeleted = 0) AS TaskCount,
         (SELECT COUNT(*) FROM dbo.ImportantDates d WHERE d.CompanyID = c.CompanyID AND d.IsDeleted = 0) AS DateCount
        FROM dbo.Companies c

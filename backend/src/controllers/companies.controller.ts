@@ -97,11 +97,10 @@ export async function getCompanies(req: Request, res: Response, next: NextFuncti
         c.CreatedAt, c.UpdatedAt,
         p.CompanyName AS ParentCompanyName,
         (SELECT COUNT(*) FROM dbo.Companies ch WHERE ch.ParentCompanyID = c.CompanyID AND ch.IsDeleted = 0) AS ChildCompanyCount,
-        (SELECT COUNT(DISTINCT UserID) FROM (
-          SELECT u.UserID FROM dbo.Users u WHERE u.CompanyID = c.CompanyID AND u.IsDeleted = 0
-          UNION
-          SELECT uc.UserID FROM dbo.UserCompany uc JOIN dbo.Users u2 ON uc.UserID = u2.UserID WHERE uc.CompanyID = c.CompanyID AND uc.IsActive = 1 AND u2.IsDeleted = 0
-        ) AS all_u) AS UserCount,
+        (SELECT COUNT(DISTINCT u.UserID) 
+         FROM dbo.Users u 
+         LEFT JOIN dbo.UserCompany uc ON u.UserID = uc.UserID AND uc.IsActive = 1
+         WHERE (u.CompanyID = c.CompanyID OR uc.CompanyID = c.CompanyID) AND u.IsDeleted = 0) AS UserCount,
         (SELECT COUNT(*) FROM dbo.Tasks t WHERE t.CompanyID = c.CompanyID AND t.IsDeleted = 0) AS TaskCount,
         (SELECT COUNT(*) FROM dbo.ImportantDates d WHERE d.CompanyID = c.CompanyID AND d.IsDeleted = 0) AS DateCount
        FROM dbo.Companies c
@@ -172,11 +171,10 @@ export async function getCompanyById(req: Request, res: Response, next: NextFunc
     // Child companies
     const childrenResult = await executeQuery<any>(
       `SELECT CompanyID, CompanyCode, CompanyName, CompanyType, Status,
-              (SELECT COUNT(DISTINCT UserID) FROM (
-                SELECT u.UserID FROM dbo.Users u WHERE u.CompanyID = c.CompanyID AND u.IsDeleted = 0
-                UNION
-                SELECT uc.UserID FROM dbo.UserCompany uc JOIN dbo.Users u2 ON uc.UserID = u2.UserID WHERE uc.CompanyID = c.CompanyID AND uc.IsActive = 1 AND u2.IsDeleted = 0
-              ) AS all_u) AS UserCount
+              (SELECT COUNT(DISTINCT u.UserID) 
+               FROM dbo.Users u 
+               LEFT JOIN dbo.UserCompany uc ON u.UserID = uc.UserID AND uc.IsActive = 1
+               WHERE (u.CompanyID = c.CompanyID OR uc.CompanyID = c.CompanyID) AND u.IsDeleted = 0) AS UserCount
        FROM dbo.Companies c
        WHERE c.ParentCompanyID = @companyId AND c.IsDeleted = 0`,
       { companyId }
