@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Plus, Mail, Phone, Calendar, Building, MapPin, Pencil, Trash2, KeyRound } from 'lucide-react';
 import { mastersApi } from '../../services/api';
 import { Employee, Department, Location, Role } from '../../types';
+import { useTenant } from '../../context/TenantContext';
 import { Button } from '../common/Button';
 import { Modal } from '../common/Modal';
 import { Input } from '../common/Input';
@@ -10,6 +11,7 @@ import { Badge } from '../common/Badge';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
 export const EmployeesTab: React.FC = () => {
+  const { activeCompanyId, accessibleCompanies } = useTenant();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -23,6 +25,7 @@ export const EmployeesTab: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Form Fields
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(activeCompanyId ? String(activeCompanyId) : '1');
   const [employeeCode, setEmployeeCode] = useState('');
   const [employeeName, setEmployeeName] = useState('');
   const [email, setEmail] = useState('');
@@ -59,6 +62,7 @@ export const EmployeesTab: React.FC = () => {
 
   const handleOpenAdd = () => {
     setEditingEmployee(null);
+    setSelectedCompanyId(activeCompanyId ? String(activeCompanyId) : (accessibleCompanies[0]?.CompanyID ? String(accessibleCompanies[0].CompanyID) : '1'));
     setEmployeeCode('');
     setEmployeeName('');
     setEmail('');
@@ -75,6 +79,7 @@ export const EmployeesTab: React.FC = () => {
 
   const handleOpenEdit = (emp: Employee) => {
     setEditingEmployee(emp);
+    setSelectedCompanyId(emp.CompanyID ? String(emp.CompanyID) : (activeCompanyId ? String(activeCompanyId) : '1'));
     setEmployeeCode(emp.EmployeeCode || '');
     setEmployeeName(emp.EmployeeName || '');
     setEmail(emp.Email || '');
@@ -119,6 +124,7 @@ export const EmployeesTab: React.FC = () => {
       if (editingEmployee) {
         // UPDATE existing employee
         await mastersApi.updateEmployee(editingEmployee.EmployeeID, {
+          companyId: selectedCompanyId ? parseInt(selectedCompanyId, 10) : undefined,
           employeeCode: employeeCode.trim(),
           employeeName: employeeName.trim(),
           email: email.trim(),
@@ -134,6 +140,7 @@ export const EmployeesTab: React.FC = () => {
       } else {
         // CREATE new employee
         await mastersApi.createEmployee({
+          companyId: selectedCompanyId ? parseInt(selectedCompanyId, 10) : undefined,
           employeeCode: employeeCode.trim(),
           employeeName: employeeName.trim(),
           email: email.trim(),
@@ -263,7 +270,19 @@ export const EmployeesTab: React.FC = () => {
           title={editingEmployee ? `Edit Employee: ${editingEmployee.EmployeeName}` : "Register New Employee"}
         >
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Select
+                label="Company / Organization"
+                value={selectedCompanyId}
+                onChange={(e) => setSelectedCompanyId(e.target.value)}
+                required
+              >
+                {accessibleCompanies.map((c) => (
+                  <option key={c.CompanyID} value={c.CompanyID}>
+                    {c.CompanyName} ({c.CompanyCode})
+                  </option>
+                ))}
+              </Select>
               <Input
                 label="Employee Code"
                 placeholder="EMP-001"
@@ -370,7 +389,7 @@ export const EmployeesTab: React.FC = () => {
               <p className="text-[11px] text-slate-500">
                 {editingEmployee
                   ? "Enter a new password only if you want to reset this employee's credentials."
-                  : "Defaults to Password@123 if left blank."}
+                  : `Credentials: User can log in using Email (${email || 'user@company.com'}) or Employee Code (${employeeCode || 'EMP-xxx'}) with this password (default: Password@123).`}
               </p>
             </div>
 

@@ -27,11 +27,11 @@ async function login(req, res, next) {
               d.DepartmentName,
               c.CompanyName, c.ShortName as CompanyShortName
        FROM dbo.Users u
-       JOIN dbo.Roles r ON u.RoleID = r.RoleID
+       LEFT JOIN dbo.Roles r ON u.RoleID = r.RoleID
        LEFT JOIN dbo.Employees e ON u.EmployeeID = e.EmployeeID
        LEFT JOIN dbo.Departments d ON e.DepartmentID = d.DepartmentID
-       JOIN dbo.Companies c ON u.CompanyID = c.CompanyID
-       WHERE (u.Username = @ident OR u.Email = @ident) AND u.IsDeleted = 0`, { ident: usernameOrEmail.trim() });
+       LEFT JOIN dbo.Companies c ON u.CompanyID = c.CompanyID
+       WHERE (u.Username = @ident OR u.Email = @ident OR e.EmployeeCode = @ident) AND u.IsDeleted = 0`, { ident: usernameOrEmail.trim() });
         if (userResult.recordset.length === 0) {
             res.status(401).json({ success: false, message: 'Invalid credentials or user account does not exist.' });
             return;
@@ -156,10 +156,10 @@ async function getMe(req, res, next) {
               d.DepartmentName,
               c.CompanyName, c.ShortName as CompanyShortName
        FROM dbo.Users u
-       JOIN dbo.Roles r ON u.RoleID = r.RoleID
+       LEFT JOIN dbo.Roles r ON u.RoleID = r.RoleID
        LEFT JOIN dbo.Employees e ON u.EmployeeID = e.EmployeeID
        LEFT JOIN dbo.Departments d ON e.DepartmentID = d.DepartmentID
-       JOIN dbo.Companies c ON u.CompanyID = c.CompanyID
+       LEFT JOIN dbo.Companies c ON u.CompanyID = c.CompanyID
        WHERE u.UserID = @userId AND u.IsDeleted = 0`, { userId: req.user.userId });
         if (userResult.recordset.length === 0) {
             res.status(404).json({ success: false, message: 'User not found.' });

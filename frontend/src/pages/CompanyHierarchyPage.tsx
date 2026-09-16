@@ -75,6 +75,15 @@ export const CompanyHierarchyPage: React.FC = () => {
     accessScope: 'Own',
     isPrimary: false,
   });
+  const [userModalTab, setUserModalTab] = useState<'assign' | 'create'>('assign');
+  const [newUserData, setNewUserData] = useState({
+    employeeCode: '',
+    employeeName: '',
+    email: '',
+    roleId: '4',
+    password: 'Password@123',
+  });
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
 
   const loadHierarchy = async () => {
     try {
@@ -199,8 +208,46 @@ export const CompanyHierarchyPage: React.FC = () => {
       const compDetails = await companiesApi.getCompanyById(selectedCompany.CompanyID);
       setMappedUsers(compDetails.data.mappedUsers || []);
       setAssignFormData({ userId: '', roleId: '4', accessScope: 'Own', isPrimary: false });
+      await loadHierarchy();
+      await refreshTenantData();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Failed to assign user.');
+    }
+  };
+
+  const handleCreateUserForCompany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCompany) return;
+    if (!newUserData.employeeCode.trim() || !newUserData.employeeName.trim() || !newUserData.email.trim()) {
+      alert('Please fill in Employee Code, Full Name, and Email.');
+      return;
+    }
+    try {
+      setIsCreatingUser(true);
+      await mastersApi.createEmployee({
+        companyId: selectedCompany.CompanyID,
+        employeeCode: newUserData.employeeCode.trim(),
+        employeeName: newUserData.employeeName.trim(),
+        email: newUserData.email.trim(),
+        roleId: parseInt(newUserData.roleId, 10),
+        createUserAccount: true,
+        password: newUserData.password.trim() || 'Password@123',
+      });
+      const [compDetails, usersRes] = await Promise.all([
+        companiesApi.getCompanyById(selectedCompany.CompanyID),
+        mastersApi.getUsers().catch(() => ({ data: [] })),
+      ]);
+      setMappedUsers(compDetails.data.mappedUsers || []);
+      setAvailableUsers(usersRes.data || []);
+      setNewUserData({ employeeCode: '', employeeName: '', email: '', roleId: '4', password: 'Password@123' });
+      setUserModalTab('assign');
+      await loadHierarchy();
+      await refreshTenantData();
+      alert(`User account created and assigned to ${selectedCompany.CompanyName} successfully!`);
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to create user for this company.');
+    } finally {
+      setIsCreatingUser(false);
     }
   };
 
@@ -211,6 +258,8 @@ export const CompanyHierarchyPage: React.FC = () => {
       await companiesApi.removeUserFromCompany(selectedCompany.CompanyID, userId);
       const compDetails = await companiesApi.getCompanyById(selectedCompany.CompanyID);
       setMappedUsers(compDetails.data.mappedUsers || []);
+      await loadHierarchy();
+      await refreshTenantData();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Failed to remove user.');
     }
@@ -715,63 +764,152 @@ export const CompanyHierarchyPage: React.FC = () => {
         title={`Mapped Users: ${selectedCompany?.CompanyName}`}
       >
         <div className="space-y-4">
-          {/* Add User Form */}
-          <form onSubmit={handleAssignUser} className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
-            <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-              <UserPlus className="w-4 h-4 text-primary-500" /> Assign User To This Company
-            </h5>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <Select
-                label="User Account"
-                value={assignFormData.userId}
-                onChange={(e) => setAssignFormData({ ...assignFormData, userId: e.target.value })}
-                options={[
-                  { value: '', label: 'Select User...' },
-                  ...availableUsers.map((u) => ({
-                    value: String(u.userId || u.UserID),
-                    label: `${u.username || u.Username} (${u.roleName || u.RoleName})`,
-                  })),
-                ]}
-              />
-              <Select
-                label="Assigned Role"
-                value={assignFormData.roleId}
-                onChange={(e) => setAssignFormData({ ...assignFormData, roleId: e.target.value })}
-                options={[
-                  { value: '1', label: 'Super Admin' },
-                  { value: '2', label: 'Group Admin' },
-                  { value: '3', label: 'Company Head' },
-                  { value: '4', label: 'Department Manager' },
-                  { value: '5', label: 'Employee' },
-                  { value: '6', label: 'Viewer' },
-                ]}
-              />
-              <Select
-                label="Access Scope"
-                value={assignFormData.accessScope}
-                onChange={(e) => setAssignFormData({ ...assignFormData, accessScope: e.target.value })}
-                options={[
-                  { value: 'Own', label: 'Level 1: Own Company Only' },
-                  { value: 'Hierarchy', label: 'Level 2: Rollup + Child Branches' },
-                  { value: 'Global', label: 'Level 4: Global SuperAdmin' },
-                ]}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={assignFormData.isPrimary}
-                  onChange={(e) => setAssignFormData({ ...assignFormData, isPrimary: e.target.checked })}
-                  className="rounded text-primary-600 focus:ring-primary-500"
+          {/* Tabs: Assign Existing User vs Create New User */}
+          <div className="flex border-b border-slate-200 dark:border-slate-700">
+            <button
+              type="button"
+              onClick={() => setUserModalTab('assign')}
+              className={`pb-2 px-3 text-xs font-bold border-b-2 transition ${
+                userModalTab === 'assign'
+                  ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              Assign Existing User
+            </button>
+            <button
+              type="button"
+              onClick={() => setUserModalTab('create')}
+              className={`pb-2 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 ${
+                userModalTab === 'create'
+                  ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              <Plus className="w-3.5 h-3.5" /> Create &amp; Add New User
+            </button>
+          </div>
+
+          {userModalTab === 'assign' ? (
+            /* Add User Form */
+            <form onSubmit={handleAssignUser} className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+              <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <UserPlus className="w-4 h-4 text-primary-500" /> Assign User To This Company
+              </h5>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <Select
+                  label="User Account"
+                  value={assignFormData.userId}
+                  onChange={(e) => setAssignFormData({ ...assignFormData, userId: e.target.value })}
+                  options={[
+                    { value: '', label: 'Select User...' },
+                    ...availableUsers.map((u: any) => ({
+                      value: String(u.userId || u.UserID),
+                      label: `${u.username || u.Username} (${u.roleName || u.RoleName})`,
+                    })),
+                  ]}
                 />
-                Set as user's primary company
-              </label>
-              <Button type="submit" size="sm">
-                Assign User
-              </Button>
-            </div>
-          </form>
+                <Select
+                  label="Assigned Role"
+                  value={assignFormData.roleId}
+                  onChange={(e) => setAssignFormData({ ...assignFormData, roleId: e.target.value })}
+                  options={[
+                    { value: '1', label: 'Super Admin' },
+                    { value: '2', label: 'Group Admin' },
+                    { value: '3', label: 'Company Head' },
+                    { value: '4', label: 'Department Manager' },
+                    { value: '5', label: 'Employee' },
+                    { value: '6', label: 'Viewer' },
+                  ]}
+                />
+                <Select
+                  label="Access Scope"
+                  value={assignFormData.accessScope}
+                  onChange={(e) => setAssignFormData({ ...assignFormData, accessScope: e.target.value })}
+                  options={[
+                    { value: 'Own', label: 'Level 1: Own Company Only' },
+                    { value: 'Hierarchy', label: 'Level 2: Rollup + Child Branches' },
+                    { value: 'Global', label: 'Level 4: Global SuperAdmin' },
+                  ]}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={assignFormData.isPrimary}
+                    onChange={(e) => setAssignFormData({ ...assignFormData, isPrimary: e.target.checked })}
+                    className="rounded text-primary-600 focus:ring-primary-500"
+                  />
+                  Set as user&apos;s primary company
+                </label>
+                <Button type="submit" size="sm">
+                  Assign User
+                </Button>
+              </div>
+            </form>
+          ) : (
+            /* Create New User Form */
+            <form onSubmit={handleCreateUserForCompany} className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+              <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <UserPlus className="w-4 h-4 text-primary-500" /> Create New User For {selectedCompany?.CompanyName}
+              </h5>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <Input
+                  label="Employee Code"
+                  placeholder="EMP-010"
+                  value={newUserData.employeeCode}
+                  onChange={(e) => setNewUserData({ ...newUserData, employeeCode: e.target.value })}
+                  required
+                />
+                <Input
+                  label="Full Name"
+                  placeholder="John Doe"
+                  value={newUserData.employeeName}
+                  onChange={(e) => setNewUserData({ ...newUserData, employeeName: e.target.value })}
+                  required
+                />
+                <Input
+                  label="Email (Login Username)"
+                  type="email"
+                  placeholder="john@company.com"
+                  value={newUserData.email}
+                  onChange={(e) => setNewUserData({ ...newUserData, email: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <Select
+                  label="Assigned Role"
+                  value={newUserData.roleId}
+                  onChange={(e) => setNewUserData({ ...newUserData, roleId: e.target.value })}
+                  options={[
+                    { value: '1', label: 'Super Admin' },
+                    { value: '2', label: 'Group Admin' },
+                    { value: '3', label: 'Company Head' },
+                    { value: '4', label: 'Department Manager' },
+                    { value: '5', label: 'Employee' },
+                    { value: '6', label: 'Viewer' },
+                  ]}
+                />
+                <Input
+                  label="Initial Password"
+                  type="password"
+                  placeholder="Password@123"
+                  value={newUserData.password}
+                  onChange={(e) => setNewUserData({ ...newUserData, password: e.target.value })}
+                />
+              </div>
+              <p className="text-[11px] text-slate-500">
+                User can sign in using this Email (or Employee Code) with password &quot;{newUserData.password || 'Password@123'}&quot;.
+              </p>
+              <div className="flex justify-end">
+                <Button type="submit" size="sm" isLoading={isCreatingUser}>
+                  Create &amp; Link User
+                </Button>
+              </div>
+            </form>
+          )}
 
           {/* Mapped Users Table */}
           <div className="max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-750">

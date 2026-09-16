@@ -229,21 +229,22 @@ async function getEmployees(req, res, next) {
 }
 async function createEmployee(req, res, next) {
     try {
-        const companyId = req.tenant?.activeCompanyId || req.user.companyId;
+        const companyId = req.body.companyId ? parseInt(req.body.companyId, 10) : (req.tenant?.activeCompanyId || req.user.companyId);
         const userId = req.user.userId;
-        const { employeeCode, employeeName, departmentId, designation, locationId, mobile, email, joiningDate, birthday, workAnniversary, managerId, createUserAccount = false, roleId, password = 'Password@123', } = req.body;
+        const tenantId = req.tenant?.tenantId || req.user?.tenantId || 1;
+        const { employeeCode, employeeName, username, departmentId, designation, locationId, mobile, email, joiningDate, birthday, workAnniversary, managerId, createUserAccount = false, roleId, password = 'Password@123', } = req.body;
         if (!employeeCode || !employeeName || !email) {
             res.status(400).json({ success: false, message: 'Employee code, name, and email are required.' });
             return;
         }
         const empResult = await (0, db_1.executeQuery)(`INSERT INTO dbo.Employees (
         CompanyID, EmployeeCode, EmployeeName, DepartmentID, Designation, LocationID,
-        Mobile, Email, JoiningDate, Birthday, WorkAnniversary, ManagerID, Status, CreatedAt, UpdatedAt
+        Mobile, Email, JoiningDate, Birthday, WorkAnniversary, ManagerID, Status, CreatedAt, UpdatedAt, TenantID
       )
       OUTPUT INSERTED.EmployeeID
       VALUES (
         @companyId, @employeeCode, @employeeName, @departmentId, @designation, @locationId,
-        @mobile, @email, @joiningDate, @birthday, @workAnniversary, @managerId, N'Active', SYSUTCDATETIME(), SYSUTCDATETIME()
+        @mobile, @email, @joiningDate, @birthday, @workAnniversary, @managerId, N'Active', SYSUTCDATETIME(), SYSUTCDATETIME(), @tenantId
       )`, {
             companyId,
             employeeCode: employeeCode.trim(),
@@ -257,24 +258,28 @@ async function createEmployee(req, res, next) {
             birthday: birthday || null,
             workAnniversary: workAnniversary || null,
             managerId: managerId ? parseInt(managerId, 10) : null,
+            tenantId,
         });
         const newEmpId = empResult.recordset[0].EmployeeID;
         // Optional user account creation
         if (createUserAccount && roleId) {
             const salt = await bcryptjs_1.default.genSalt(10);
             const passwordHash = await bcryptjs_1.default.hash(password, salt);
+            const userIdent = username && username.trim() ? username.trim() : email.trim();
             const userInsert = await (0, db_1.executeQuery)(`INSERT INTO dbo.Users (
-          CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status, CreatedAt, UpdatedAt
+          CompanyID, EmployeeID, Username, Email, PasswordHash, RoleID, Status, CreatedAt, UpdatedAt, TenantID
         )
         OUTPUT INSERTED.UserID
         VALUES (
-          @companyId, @newEmpId, @email, @email, @passwordHash, @roleId, N'Active', SYSUTCDATETIME(), SYSUTCDATETIME()
+          @companyId, @newEmpId, @userIdent, @email, @passwordHash, @roleId, N'Active', SYSUTCDATETIME(), SYSUTCDATETIME(), @tenantId
         )`, {
                 companyId,
                 newEmpId,
+                userIdent,
                 email: email.trim(),
                 passwordHash,
                 roleId: parseInt(roleId, 10),
+                tenantId,
             });
             const newUserId = userInsert.recordset[0].UserID;
             // Map user in UserCompany table
@@ -333,6 +338,14 @@ async function updateEmployee(req, res, next) {
             managerId: managerId ? parseInt(managerId, 10) : null,
             status: status || null,
         });
+        // If companyId provided, update company across Employee, User, and UserCompany
+        if (req.body.companyId) {
+            const compId = parseInt(req.body.companyId, 10);
+            await (0, db_1.executeQuery)(`UPDATE dbo.Employees SET CompanyID = @compId WHERE EmployeeID = @employeeId`, { compId, employeeId });
+            await (0, db_1.executeQuery)(`UPDATE dbo.Users SET CompanyID = @compId WHERE EmployeeID = @employeeId`, { compId, employeeId });
+            await (0, db_1.executeQuery)(`UPDATE dbo.UserCompany SET CompanyID = @compId 
+         WHERE UserID IN (SELECT UserID FROM dbo.Users WHERE EmployeeID = @employeeId) AND IsPrimary = 1`, { compId, employeeId });
+        }
         // If roleId provided, update linked User account
         if (roleId) {
             await (0, db_1.executeQuery)(`UPDATE dbo.Users SET

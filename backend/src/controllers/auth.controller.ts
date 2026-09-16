@@ -23,11 +23,11 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
               d.DepartmentName,
               c.CompanyName, c.ShortName as CompanyShortName
        FROM dbo.Users u
-       JOIN dbo.Roles r ON u.RoleID = r.RoleID
+       LEFT JOIN dbo.Roles r ON u.RoleID = r.RoleID
        LEFT JOIN dbo.Employees e ON u.EmployeeID = e.EmployeeID
        LEFT JOIN dbo.Departments d ON e.DepartmentID = d.DepartmentID
-       JOIN dbo.Companies c ON u.CompanyID = c.CompanyID
-       WHERE (u.Username = @ident OR u.Email = @ident) AND u.IsDeleted = 0`,
+       LEFT JOIN dbo.Companies c ON u.CompanyID = c.CompanyID
+       WHERE (u.Username = @ident OR u.Email = @ident OR e.EmployeeCode = @ident) AND u.IsDeleted = 0`,
       { ident: usernameOrEmail.trim() }
     );
 
@@ -179,10 +179,10 @@ export async function getMe(req: Request, res: Response, next: NextFunction): Pr
               d.DepartmentName,
               c.CompanyName, c.ShortName as CompanyShortName
        FROM dbo.Users u
-       JOIN dbo.Roles r ON u.RoleID = r.RoleID
+       LEFT JOIN dbo.Roles r ON u.RoleID = r.RoleID
        LEFT JOIN dbo.Employees e ON u.EmployeeID = e.EmployeeID
        LEFT JOIN dbo.Departments d ON e.DepartmentID = d.DepartmentID
-       JOIN dbo.Companies c ON u.CompanyID = c.CompanyID
+       LEFT JOIN dbo.Companies c ON u.CompanyID = c.CompanyID
        WHERE u.UserID = @userId AND u.IsDeleted = 0`,
       { userId: req.user.userId }
     );
