@@ -33,11 +33,8 @@ async function getUsersForCompanyRights(req, res, next) {
         e.Designation,
         (
           SELECT COUNT(DISTINCT company_id) 
-          FROM (
-            SELECT company_id FROM dbo.tbl_user_companies WHERE user_id = u.UserID AND is_active = 1
-            UNION
-            SELECT CompanyID AS company_id FROM dbo.UserCompany WHERE UserID = u.UserID AND IsActive = 1
-          ) m
+          FROM dbo.tbl_user_companies 
+          WHERE user_id = u.UserID AND is_active = 1
         ) AS AssignedCompanyCount
       FROM dbo.Users u
       LEFT JOIN dbo.Roles r ON u.RoleID = r.RoleID
@@ -92,12 +89,7 @@ async function getUserCompanyRights(req, res, next) {
        WHERE ${compWhere}
        ORDER BY c.CompanyName ASC`);
         // Fetch currently assigned companies for target user
-        const assignedResult = await (0, db_1.executeQuery)(`SELECT DISTINCT company_id 
-       FROM (
-         SELECT company_id FROM dbo.tbl_user_companies WHERE user_id = @targetUserId AND is_active = 1
-         UNION
-         SELECT CompanyID AS company_id FROM dbo.UserCompany WHERE UserID = @targetUserId AND IsActive = 1
-       ) m`, { targetUserId });
+        const assignedResult = await (0, db_1.executeQuery)(`SELECT company_id FROM dbo.tbl_user_companies WHERE user_id = @targetUserId AND is_active = 1`, { targetUserId });
         const assignedSet = new Set(assignedResult.recordset.map((r) => r.company_id));
         // Fallback: If no mappings exist yet, targetUser.CompanyID is assigned by default
         if (assignedSet.size === 0 && targetUser.CompanyID) {

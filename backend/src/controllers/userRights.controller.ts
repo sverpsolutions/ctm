@@ -33,11 +33,8 @@ export async function getUsersForCompanyRights(req: Request, res: Response, next
         e.Designation,
         (
           SELECT COUNT(DISTINCT company_id) 
-          FROM (
-            SELECT company_id FROM dbo.tbl_user_companies WHERE user_id = u.UserID AND is_active = 1
-            UNION
-            SELECT CompanyID AS company_id FROM dbo.UserCompany WHERE UserID = u.UserID AND IsActive = 1
-          ) m
+          FROM dbo.tbl_user_companies 
+          WHERE user_id = u.UserID AND is_active = 1
         ) AS AssignedCompanyCount
       FROM dbo.Users u
       LEFT JOIN dbo.Roles r ON u.RoleID = r.RoleID
@@ -106,12 +103,7 @@ export async function getUserCompanyRights(req: Request, res: Response, next: Ne
 
     // Fetch currently assigned companies for target user
     const assignedResult = await executeQuery<any>(
-      `SELECT DISTINCT company_id 
-       FROM (
-         SELECT company_id FROM dbo.tbl_user_companies WHERE user_id = @targetUserId AND is_active = 1
-         UNION
-         SELECT CompanyID AS company_id FROM dbo.UserCompany WHERE UserID = @targetUserId AND IsActive = 1
-       ) m`,
+      `SELECT company_id FROM dbo.tbl_user_companies WHERE user_id = @targetUserId AND is_active = 1`,
       { targetUserId }
     );
 
