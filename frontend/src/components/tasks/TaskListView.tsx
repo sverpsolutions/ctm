@@ -4,6 +4,7 @@ import {
   Clock,
   User,
   Building,
+  Building2,
   CheckSquare,
   ArrowUpDown,
   MoreVertical,
@@ -68,7 +69,9 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
   const exportToExcel = async () => {
     const dataToExport = tasks.map((t) => ({
       'Task No': t.TaskNumber,
+      'Company': t.CompanyName || t.CompanyCode || `Company #${t.CompanyID}`,
       'Title': t.TaskTitle,
+      'Type': t.TaskType || 'General',
       'Status': t.EffectiveStatus,
       'Priority': t.Priority,
       'Department': t.DepartmentName || 'General',
@@ -79,14 +82,15 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
       'Actual Hours': t.ActualHours,
     }));
 
-    await exportDataToExcel(dataToExport, 'Tasks', `ApexCorp_Tasks_${new Date().toISOString().substring(0, 10)}.xlsx`);
+    await exportDataToExcel(dataToExport, 'Tasks', `Tasks_Export_${new Date().toISOString().substring(0, 10)}.xlsx`);
   };
 
   // Export to PDF
   const exportToPdf = async () => {
-    const headers = ['Task No', 'Title', 'Department', 'Priority', 'Status', 'Due Date', 'Assignee', 'Progress'];
+    const headers = ['Task No', 'Company', 'Title', 'Department', 'Priority', 'Status', 'Due Date', 'Assignee', 'Progress'];
     const tableRows = tasks.map((t) => [
       t.TaskNumber,
+      t.CompanyName || t.CompanyCode || `Co #${t.CompanyID}`,
       t.TaskTitle,
       t.DepartmentName || 'General',
       t.Priority,
@@ -97,10 +101,10 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
     ]);
 
     await exportDataToPdf(
-      'Apex Global Solutions — Task Management Report',
+      'Multi-Company Task Management Report',
       headers,
       tableRows,
-      `ApexCorp_Tasks_${new Date().toISOString().substring(0, 10)}.pdf`,
+      `Tasks_Report_${new Date().toISOString().substring(0, 10)}.pdf`,
       [79, 70, 229]
     );
   };
@@ -140,6 +144,11 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
                   Task No <ArrowUpDown className="w-3 h-3" />
                 </div>
               </th>
+              <th className="py-3.5 px-3 cursor-pointer hover:text-indigo-600" onClick={() => onSort('CompanyName')}>
+                <div className="flex items-center gap-1">
+                  Company <ArrowUpDown className="w-3 h-3" />
+                </div>
+              </th>
               <th className="py-3.5 px-3 cursor-pointer hover:text-indigo-600" onClick={() => onSort('TaskTitle')}>
                 <div className="flex items-center gap-1">
                   Title <ArrowUpDown className="w-3 h-3" />
@@ -177,7 +186,7 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
             {tasks.length === 0 ? (
               <tr>
-                <td colSpan={10} className="py-12 text-center text-slate-400">
+                <td colSpan={11} className="py-12 text-center text-slate-400">
                   No tasks matching the selected filters.
                 </td>
               </tr>
@@ -204,6 +213,12 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
                     </td>
                     <td className="py-3.5 px-3 font-extrabold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
                       {task.TaskNumber}
+                    </td>
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-[11px] border border-slate-200 dark:border-slate-700 max-w-[150px] truncate" title={task.CompanyName || task.CompanyCode}>
+                        <Building2 className="w-3 h-3 text-indigo-500 flex-shrink-0" />
+                        <span className="truncate">{task.CompanyCode || task.CompanyName || 'Co'}</span>
+                      </span>
                     </td>
                     <td className="py-3.5 px-3">
                       <div className="font-bold text-slate-900 dark:text-slate-100 line-clamp-1 max-w-xs sm:max-w-sm">

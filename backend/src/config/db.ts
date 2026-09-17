@@ -723,6 +723,81 @@ async function initMysqlSchemaAndSeed() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS tbl_user_companies (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      user_id INT NOT NULL,
+      company_id INT NOT NULL,
+      is_active TINYINT DEFAULT 1,
+      created_by INT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_by INT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_user_company (user_id, company_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  // Ensure Tasks table has multi-company fields in MySQL
+  try {
+    const [cols] = await mysqlPool!.execute(`
+      SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Tasks'
+    `);
+    const colNames = (cols as any[]).map((c: any) => c.COLUMN_NAME);
+    if (!colNames.includes('TaskType')) {
+      await runSql(`ALTER TABLE Tasks ADD COLUMN TaskType VARCHAR(100) DEFAULT 'General'`);
+    }
+    if (!colNames.includes('ReminderDate')) {
+      await runSql(`ALTER TABLE Tasks ADD COLUMN ReminderDate VARCHAR(20)`);
+    }
+    if (!colNames.includes('Remarks')) {
+      await runSql(`ALTER TABLE Tasks ADD COLUMN Remarks TEXT`);
+    }
+    if (!colNames.includes('CreatedBy')) {
+      await runSql(`ALTER TABLE Tasks ADD COLUMN CreatedBy INT`);
+    }
+    if (!colNames.includes('UpdatedBy')) {
+      await runSql(`ALTER TABLE Tasks ADD COLUMN UpdatedBy INT`);
+    }
+    if (!colNames.includes('TaskTitle') && colNames.includes('Title')) {
+      await runSql(`ALTER TABLE Tasks ADD COLUMN TaskTitle VARCHAR(500)`);
+      await runSql(`UPDATE Tasks SET TaskTitle = Title WHERE TaskTitle IS NULL`);
+    }
+
+    // Create or replace compatibility view tbl_tasks
+    await runSql(`
+      CREATE OR REPLACE VIEW tbl_tasks AS
+      SELECT 
+        TaskID AS id,
+        CompanyID AS company_id,
+        COALESCE(TaskTitle, Title) AS task_title,
+        TaskDescription AS task_description,
+        TaskType AS task_type,
+        Priority AS priority,
+        (SELECT EmployeeID FROM TaskAssignees WHERE TaskID = Tasks.TaskID LIMIT 1) AS assigned_to,
+        DueDate AS due_date,
+        ReminderDate AS reminder_date,
+        Status AS status,
+        Remarks AS remarks,
+        CreatedBy AS created_by,
+        CreatedAt AS created_at,
+        UpdatedBy AS updated_by,
+        UpdatedAt AS updated_at
+      FROM Tasks
+    `);
+
+    // Sync UserCompany into tbl_user_companies if empty
+    const [tblRows] = await mysqlPool!.execute(`SELECT COUNT(*) AS cnt FROM tbl_user_companies`);
+    if ((tblRows as any[])[0]?.cnt === 0) {
+      await runSql(`
+        INSERT IGNORE INTO tbl_user_companies (user_id, company_id, is_active, created_at, updated_at)
+        SELECT UserID, CompanyID, IsActive, CreatedAt, NOW() FROM UserCompany
+      `);
+    }
+  } catch (migErr) {
+    console.warn('[Database] MySQL migration check warning:', migErr);
+  }
+
   // Seed data if tables are empty
   const [userRows] = await mysqlPool!.execute('SELECT COUNT(*) as cnt FROM Users');
   const userCount = (userRows as any[])[0].cnt;
@@ -1878,6 +1953,58 @@ async function initSqliteSchemaAndSeed() {
     });
     console.log(`[Database] Fixed ${usersWithFakeHash.length} user(s) with invalid password hashes.`);
   }
+
+  // Ensure tbl_user_companies table and multi-company Task fields are initialized
+  try {
+    await runSql(`
+      CREATE TABLE IF NOT EXISTS tbl_user_companies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        company_id INTEGER NOT NULL,
+        is_active INTEGER DEFAULT 1,
+        created_by INTEGER,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_by INTEGER,
+        updated_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(user_id, company_id)
+      );
+    `);
+  } catch {}
+  try { await runSql(`ALTER TABLE Tasks ADD COLUMN TaskType TEXT DEFAULT 'General'`); } catch {}
+  try { await runSql(`ALTER TABLE Tasks ADD COLUMN ReminderDate TEXT`); } catch {}
+  try { await runSql(`ALTER TABLE Tasks ADD COLUMN Remarks TEXT`); } catch {}
+  try { await runSql(`ALTER TABLE Tasks ADD COLUMN UpdatedBy INTEGER`); } catch {}
+  try { await runSql(`ALTER TABLE UserCompany ADD COLUMN CreatedBy INTEGER`); } catch {}
+  try { await runSql(`ALTER TABLE UserCompany ADD COLUMN UpdatedBy INTEGER`); } catch {}
+  try {
+    await runSql(`
+      CREATE VIEW IF NOT EXISTS tbl_tasks AS
+      SELECT 
+        TaskID AS id,
+        CompanyID AS company_id,
+        TaskTitle AS task_title,
+        TaskDescription AS task_description,
+        TaskType AS task_type,
+        Priority AS priority,
+        (SELECT EmployeeID FROM TaskAssignees WHERE TaskID = Tasks.TaskID LIMIT 1) AS assigned_to,
+        StartDate AS start_date,
+        DueDate AS due_date,
+        ReminderDate AS reminder_date,
+        Status AS status,
+        Remarks AS remarks,
+        AssignedByID AS created_by,
+        CreatedAt AS created_at,
+        UpdatedBy AS updated_by,
+        UpdatedAt AS updated_at
+      FROM Tasks
+    `);
+  } catch {}
+  try {
+    await runSql(`
+      INSERT OR IGNORE INTO tbl_user_companies (user_id, company_id, is_active, created_at, updated_at)
+      SELECT UserID, CompanyID, IsActive, CreatedAt, UpdatedAt FROM UserCompany
+    `);
+  } catch {}
 }
 
 /**

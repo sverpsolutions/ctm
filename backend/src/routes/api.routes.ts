@@ -17,6 +17,7 @@ import * as mastCtrl from '../controllers/masters.controller';
 import * as notifCtrl from '../controllers/notifications.controller';
 import * as audCtrl from '../controllers/audit.controller';
 import * as setCtrl from '../controllers/settings.controller';
+import * as rightsCtrl from '../controllers/userRights.controller';
 import { runDailyMaintenanceJob } from '../jobs/scheduler.job';
 
 const router = Router();
@@ -69,6 +70,13 @@ router.post('/companies', requireRole('Super Admin', 'Group Admin', 'Company Adm
 router.put('/companies/:id', requireRole('Super Admin', 'Group Admin', 'Company Admin'), compCtrl.updateCompany);
 router.post('/companies/:id/users', requireRole('Super Admin', 'Company Admin'), compCtrl.assignUserToCompany);
 router.delete('/companies/:id/users/:userId', requireRole('Super Admin', 'Company Admin'), compCtrl.removeUserFromCompany);
+
+// ==========================================
+// USER COMPANY RIGHTS MANAGEMENT (tbl_user_companies)
+// ==========================================
+router.get('/user-company-rights/users', requireRole('Super Admin', 'Group Admin', 'Company Admin'), rightsCtrl.getUsersForCompanyRights);
+router.get('/user-company-rights/:userId', requireRole('Super Admin', 'Group Admin', 'Company Admin'), rightsCtrl.getUserCompanyRights);
+router.post('/user-company-rights/:userId', requireRole('Super Admin', 'Group Admin', 'Company Admin'), rightsCtrl.saveUserCompanyRights);
 
 // ==========================================
 // DASHBOARD

@@ -7,6 +7,7 @@ import { LocationsTab } from '../components/masters/LocationsTab';
 import { DepartmentsTab } from '../components/masters/DepartmentsTab';
 import { EmployeesTab } from '../components/masters/EmployeesTab';
 import { RolesPermissionsTab } from '../components/masters/RolesPermissionsTab';
+import { UserCompanyRightsPage } from './UserCompanyRightsPage';
 
 export const MastersPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('company');
@@ -18,6 +19,7 @@ export const MastersPage: React.FC = () => {
     { id: 'departments', label: 'Departments', icon: <Building className="w-4 h-4" /> },
     { id: 'employees', label: 'Staff & Employees', icon: <Users className="w-4 h-4" /> },
     { id: 'roles', label: 'Roles & RBAC Matrix', icon: <ShieldCheck className="w-4 h-4" /> },
+    { id: 'user-rights', label: 'User Company Rights', icon: <ShieldCheck className="w-4 h-4 text-emerald-500" /> },
   ];
 
   return (
@@ -39,6 +41,7 @@ export const MastersPage: React.FC = () => {
         {activeTab === 'departments' && <DepartmentsTab />}
         {activeTab === 'employees' && <EmployeesTab />}
         {activeTab === 'roles' && <RolesPermissionsTab />}
+        {activeTab === 'user-rights' && <UserCompanyRightsPage />}
       </div>
     </div>
   );

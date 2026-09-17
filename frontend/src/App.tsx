@@ -22,6 +22,7 @@ const PlatformTenantsPage = React.lazy(() => import('./pages/PlatformTenantsPage
 const PlatformRegistrationsPage = React.lazy(() => import('./pages/PlatformRegistrationsPage'));
 const PlatformUsersPage = React.lazy(() => import('./pages/PlatformUsersPage'));
 const RegisterPage = React.lazy(() => import('./pages/RegisterPage'));
+const UserCompanyRightsPage = React.lazy(() => import('./pages/UserCompanyRightsPage').then(m => ({ default: m.UserCompanyRightsPage })));
 
 const PageLoader: React.FC = () => (
   <div className="flex items-center justify-center p-16">
@@ -112,6 +113,14 @@ export const App: React.FC = () => {
                 element={
                   <ProtectedRoute requiredPermission="masters.manage">
                     <Suspense fallback={<PageLoader />}><MastersPage /></Suspense>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="user-company-rights"
+                element={
+                  <ProtectedRoute requiredPermission="masters.manage">
+                    <Suspense fallback={<PageLoader />}><UserCompanyRightsPage /></Suspense>
                   </ProtectedRoute>
                 }
               />

@@ -82,13 +82,20 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                     onClick={() => onTaskClick(task.TaskID)}
                     className="p-3.5 bg-white dark:bg-slate-850 dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer space-y-2.5 active:scale-[0.98] group"
                   >
-                    {/* Header: Number & Priority */}
+                    {/* Header: Number, Company & Priority */}
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-100 dark:border-indigo-900">
-                        {task.TaskNumber}
-                      </span>
+                      <div className="flex items-center gap-1.5 overflow-hidden">
+                        <span className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-100 dark:border-indigo-900 flex-shrink-0">
+                          {task.TaskNumber}
+                        </span>
+                        {(task.CompanyName || task.CompanyCode) && (
+                          <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded truncate max-w-[100px]" title={task.CompanyName}>
+                            {task.CompanyCode || task.CompanyName}
+                          </span>
+                        )}
+                      </div>
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
                           task.Priority === 'Critical'
                             ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
                             : task.Priority === 'High'

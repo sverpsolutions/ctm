@@ -28,7 +28,7 @@ import { Select } from '../components/common/Select';
 
 export const TasksPage: React.FC = () => {
   const { user, hasPermission } = useAuth();
-  const { activeCompanyId } = useTenant();
+  const { activeCompanyId, accessibleCompanies } = useTenant();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // State
@@ -43,6 +43,7 @@ export const TasksPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('');
+  const [companyFilter, setCompanyFilter] = useState('');
   const [myTasksOnly, setMyTasksOnly] = useState(false);
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
 
@@ -85,6 +86,7 @@ export const TasksPage: React.FC = () => {
         assigneeId: myTasksOnly && user?.employeeId ? user.employeeId : undefined,
         sortBy,
         sortOrder,
+        companyId: companyFilter ? parseInt(companyFilter, 10) : undefined,
       });
 
       setTasks(res.data || []);
@@ -102,7 +104,7 @@ export const TasksPage: React.FC = () => {
 
   useEffect(() => {
     fetchTasks(pagination.page);
-  }, [viewMode, statusFilter, priorityFilter, departmentFilter, myTasksOnly, sortBy, sortOrder, activeCompanyId]);
+  }, [viewMode, statusFilter, priorityFilter, departmentFilter, companyFilter, myTasksOnly, sortBy, sortOrder, activeCompanyId]);
 
   // Search Debounce
   useEffect(() => {
@@ -312,7 +314,7 @@ export const TasksPage: React.FC = () => {
             <button
               onClick={() => setIsFilterDrawerOpen(!isFilterDrawerOpen)}
               className={`p-2 rounded-lg border transition ${
-                isFilterDrawerOpen || priorityFilter || departmentFilter
+                isFilterDrawerOpen || priorityFilter || departmentFilter || companyFilter
                   ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-600'
                   : 'border-slate-200 dark:border-slate-700 text-slate-500'
               }`}
@@ -325,7 +327,20 @@ export const TasksPage: React.FC = () => {
 
         {/* Expanded Filters Drawer */}
         {isFilterDrawerOpen && (
-          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 animate-in fade-in duration-150 text-xs">
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-4 gap-3 animate-in fade-in duration-150 text-xs">
+            <Select
+              label="Company"
+              value={companyFilter}
+              onChange={(e) => setCompanyFilter(e.target.value)}
+            >
+              <option value="">All Accessible Companies</option>
+              {accessibleCompanies.map((c) => (
+                <option key={c.CompanyID} value={c.CompanyID}>
+                  {c.CompanyName} ({c.CompanyCode})
+                </option>
+              ))}
+            </Select>
+
             <Select
               label="Department"
               value={departmentFilter}
@@ -359,6 +374,7 @@ export const TasksPage: React.FC = () => {
                   setStatusFilter('');
                   setPriorityFilter('');
                   setDepartmentFilter('');
+                  setCompanyFilter('');
                   setMyTasksOnly(false);
                   setIsFilterDrawerOpen(false);
                 }}

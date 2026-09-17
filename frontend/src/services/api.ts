@@ -16,6 +16,9 @@ import {
   CalendarEventItem,
   NotificationItem,
   DashboardData,
+  UserCompanyRightsUser,
+  UserCompanyRightsData,
+  SaveUserCompanyRightsPayload,
 } from '../types';
 
 const api = axios.create({
@@ -434,6 +437,24 @@ export const registrationApi = {
   },
   submitRegistration: async (token: string, data: any) => {
     const res = await api.post(`/register/${token}`, data);
+    return res.data;
+  },
+};
+
+// ========================================================
+// USER COMPANY RIGHTS API (tbl_user_companies)
+// ========================================================
+export const userCompanyRightsApi = {
+  getUsers: async (): Promise<{ success: boolean; data: UserCompanyRightsUser[] }> => {
+    const res = await api.get('/user-company-rights/users');
+    return res.data;
+  },
+  getUserRights: async (userId: number): Promise<{ success: boolean; data: UserCompanyRightsData }> => {
+    const res = await api.get(`/user-company-rights/${userId}`);
+    return res.data;
+  },
+  saveUserRights: async (userId: number, payload: SaveUserCompanyRightsPayload): Promise<{ success: boolean; message: string; data: any }> => {
+    const res = await api.post(`/user-company-rights/${userId}`, payload);
     return res.data;
   },
 };

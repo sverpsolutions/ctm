@@ -100,20 +100,31 @@ class TenantService {
                 EnabledModules: c.EnabledModules ? (typeof c.EnabledModules === 'string' ? JSON.parse(c.EnabledModules) : c.EnabledModules) : ['tasks', 'dates', 'calendar', 'reports', 'audit'],
             }));
         }
-        // Query UserCompany mapping
-        const mappingsResult = await (0, db_1.executeQuery)(`SELECT uc.CompanyID, c.CompanyName, c.CompanyCode, c.ParentCompanyID, c.CompanyType,
-              c.EnabledModules, uc.RoleID, r.RoleName, uc.AccessScope, uc.IsPrimary
-       FROM dbo.UserCompany uc
-       JOIN dbo.Companies c ON uc.CompanyID = c.CompanyID
-       JOIN dbo.Roles r ON uc.RoleID = r.RoleID
-       WHERE uc.UserID = @userId AND uc.IsActive = 1 AND c.IsDeleted = 0 AND c.Status = 'Active'
-       ORDER BY uc.IsPrimary DESC, c.CompanyName ASC`, { userId });
+        // Query UserCompany & tbl_user_companies mapping
+        const mappingsResult = await (0, db_1.executeQuery)(`SELECT DISTINCT c.CompanyID, c.CompanyName, c.CompanyCode, c.ParentCompanyID, c.CompanyType,
+              c.EnabledModules, 
+              COALESCE(uc.RoleID, u.RoleID) AS RoleID, 
+              COALESCE(r.RoleName, ur.RoleName) AS RoleName, 
+              COALESCE(uc.AccessScope, 'Own') AS AccessScope, 
+              CASE WHEN u.CompanyID = c.CompanyID OR uc.IsPrimary = 1 THEN 1 ELSE 0 END AS IsPrimary
+       FROM dbo.Companies c
+       JOIN (
+         SELECT user_id AS UserID, company_id AS CompanyID FROM dbo.tbl_user_companies WHERE is_active = 1
+         UNION
+         SELECT UserID, CompanyID FROM dbo.UserCompany WHERE IsActive = 1
+       ) map ON c.CompanyID = map.CompanyID
+       JOIN dbo.Users u ON u.UserID = map.UserID
+       LEFT JOIN dbo.Roles ur ON u.RoleID = ur.RoleID
+       LEFT JOIN dbo.UserCompany uc ON uc.UserID = map.UserID AND uc.CompanyID = map.CompanyID
+       LEFT JOIN dbo.Roles r ON uc.RoleID = r.RoleID
+       WHERE map.UserID = @userId AND c.IsDeleted = 0 AND c.Status = 'Active'
+       ORDER BY IsPrimary DESC, c.CompanyName ASC`, { userId });
         let list = mappingsResult.recordset.map((c) => ({
             ...c,
             IsPrimary: Boolean(c.IsPrimary),
             EnabledModules: c.EnabledModules ? (typeof c.EnabledModules === 'string' ? JSON.parse(c.EnabledModules) : c.EnabledModules) : ['tasks', 'dates', 'calendar', 'reports', 'audit'],
         }));
-        // Fallback: If no explicit UserCompany mapping exists, check user's default company
+        // Fallback: If no explicit mapping exists, check user's default company
         if (list.length === 0) {
             const userDef = await (0, db_1.executeQuery)(`SELECT u.CompanyID, c.CompanyName, c.CompanyCode, c.ParentCompanyID, c.CompanyType,
                 c.EnabledModules, u.RoleID, r.RoleName, 'Own' AS AccessScope, 1 AS IsPrimary
@@ -128,6 +139,15 @@ class TenantService {
             }));
         }
         return list;
+    }
+    /**
+     * Fast verification check if user has access to a specific company ID
+     */
+    static async hasCompanyAccess(userId, companyId, roleName, isPlatformAdmin) {
+        if (isPlatformAdmin || roleName === 'Super Admin')
+            return true;
+        const accessible = await this.getUserAccessibleCompanies(userId, roleName, null, isPlatformAdmin);
+        return accessible.some((c) => c.CompanyID === companyId);
     }
     /**
      * Resolves the full TenantContext for the current request

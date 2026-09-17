@@ -51,6 +51,7 @@ const mastCtrl = __importStar(require("../controllers/masters.controller"));
 const notifCtrl = __importStar(require("../controllers/notifications.controller"));
 const audCtrl = __importStar(require("../controllers/audit.controller"));
 const setCtrl = __importStar(require("../controllers/settings.controller"));
+const rightsCtrl = __importStar(require("../controllers/userRights.controller"));
 const scheduler_job_1 = require("../jobs/scheduler.job");
 const router = (0, express_1.Router)();
 // ==========================================
@@ -97,6 +98,12 @@ router.post('/companies', (0, rbac_middleware_1.requireRole)('Super Admin', 'Gro
 router.put('/companies/:id', (0, rbac_middleware_1.requireRole)('Super Admin', 'Group Admin', 'Company Admin'), compCtrl.updateCompany);
 router.post('/companies/:id/users', (0, rbac_middleware_1.requireRole)('Super Admin', 'Company Admin'), compCtrl.assignUserToCompany);
 router.delete('/companies/:id/users/:userId', (0, rbac_middleware_1.requireRole)('Super Admin', 'Company Admin'), compCtrl.removeUserFromCompany);
+// ==========================================
+// USER COMPANY RIGHTS MANAGEMENT (tbl_user_companies)
+// ==========================================
+router.get('/user-company-rights/users', (0, rbac_middleware_1.requireRole)('Super Admin', 'Group Admin', 'Company Admin'), rightsCtrl.getUsersForCompanyRights);
+router.get('/user-company-rights/:userId', (0, rbac_middleware_1.requireRole)('Super Admin', 'Group Admin', 'Company Admin'), rightsCtrl.getUserCompanyRights);
+router.post('/user-company-rights/:userId', (0, rbac_middleware_1.requireRole)('Super Admin', 'Group Admin', 'Company Admin'), rightsCtrl.saveUserCompanyRights);
 // ==========================================
 // DASHBOARD
 // ==========================================

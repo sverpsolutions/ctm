@@ -4,6 +4,7 @@ import {
   Clock,
   User,
   Building,
+  Building2,
   Tag,
   CheckSquare,
   MessageSquare,
@@ -201,9 +202,13 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           {/* Header Banner */}
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <div className="flex items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <span className="text-xs font-extrabold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2.5 py-1 rounded-lg border border-indigo-100 dark:border-indigo-900">
                   {task.TaskNumber}
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700" title={task.CompanyName}>
+                  <Building2 className="w-3.5 h-3.5 text-indigo-500" />
+                  {task.CompanyName || task.CompanyCode || 'Company'}
                 </span>
                 <Badge
                   variant={
@@ -335,6 +340,33 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               {/* Sidebar Info */}
               <div className="space-y-4 bg-slate-50/70 dark:bg-slate-800/30 p-4 rounded-xl border border-slate-100 dark:border-slate-800 text-xs">
                 <div>
+                  <span className="text-slate-400 font-semibold block mb-1">Company</span>
+                  <div className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-200">
+                    <Building2 className="w-4 h-4 text-indigo-500" />
+                    {task.CompanyName || task.CompanyCode || 'Primary Company'}
+                  </div>
+                </div>
+
+                {task.TaskType && (
+                  <div>
+                    <span className="text-slate-400 font-semibold block mb-1">Task Type</span>
+                    <div className="font-semibold text-slate-700 dark:text-slate-300">
+                      {task.TaskType}
+                    </div>
+                  </div>
+                )}
+
+                {task.StartDate && (
+                  <div>
+                    <span className="text-slate-400 font-semibold block mb-1">Start Date</span>
+                    <div className="flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-200">
+                      <Calendar className="w-4 h-4 text-slate-400" />
+                      {new Date(task.StartDate).toLocaleDateString()}
+                    </div>
+                  </div>
+                )}
+
+                <div>
                   <span className="text-slate-400 font-semibold block mb-1">Due Date</span>
                   <div className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-200">
                     <Calendar className="w-4 h-4 text-indigo-500" />
@@ -344,6 +376,25 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                     </span>
                   </div>
                 </div>
+
+                {task.ReminderDate && (
+                  <div>
+                    <span className="text-slate-400 font-semibold block mb-1">Reminder Date</span>
+                    <div className="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
+                      <Clock className="w-4 h-4 text-amber-500" />
+                      {new Date(task.ReminderDate).toLocaleDateString()}
+                    </div>
+                  </div>
+                )}
+
+                {task.Remarks && (
+                  <div>
+                    <span className="text-slate-400 font-semibold block mb-1">Remarks</span>
+                    <div className="text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 text-[11px] leading-relaxed whitespace-pre-wrap">
+                      {task.Remarks}
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <span className="text-slate-400 font-semibold block mb-1">Department</span>

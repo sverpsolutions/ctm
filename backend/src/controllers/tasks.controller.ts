@@ -5,7 +5,6 @@ import { sendNotification } from '../services/notification.service';
 
 export async function getTasks(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const companyId = req.user!.companyId;
     const {
       page = '1',
       limit = '25',
@@ -19,6 +18,7 @@ export async function getTasks(req: Request, res: Response, next: NextFunction):
       myTasks,
       dueDateFrom,
       dueDateTo,
+      companyId,
       sortBy = 'DueDate',
       sortOrder = 'ASC',
     } = req.query;
@@ -27,10 +27,34 @@ export async function getTasks(req: Request, res: Response, next: NextFunction):
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 25));
     const offset = (pageNum - 1) * limitNum;
 
+    const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+    const allowedCompanyIds = req.tenant?.allowedCompanyIds || [req.user!.companyId];
     const scopeIds = req.tenant?.scopeCompanyIds || [req.user!.companyId];
-    const tScope = scopeIds.length === 1 ? `t.CompanyID = ${scopeIds[0]}` : `t.CompanyID IN (${scopeIds.join(', ')})`;
-    let whereClauses: string[] = [tScope, 't.IsDeleted = 0'];
+
+    let whereClauses: string[] = ['t.IsDeleted = 0'];
     const params: Record<string, any> = { limitNum, offset };
+
+    // Strict Company Filter Enforcement
+    if (companyId) {
+      const filterCompId = parseInt(companyId as string, 10);
+      if (!isSuperAdmin && !allowedCompanyIds.includes(filterCompId)) {
+        res.status(403).json({
+          success: false,
+          message: `Forbidden: You do not have permission to access tasks for Company #${filterCompId}.`,
+        });
+        return;
+      }
+      whereClauses.push(`t.CompanyID = @filterCompId`);
+      params.filterCompId = filterCompId;
+    } else {
+      if (!isSuperAdmin) {
+        if (allowedCompanyIds.length === 1) {
+          whereClauses.push(`t.CompanyID = ${allowedCompanyIds[0]}`);
+        } else {
+          whereClauses.push(`t.CompanyID IN (${allowedCompanyIds.join(', ')})`);
+        }
+      }
+    }
 
     if (search) {
       whereClauses.push(`(
@@ -39,7 +63,8 @@ export async function getTasks(req: Request, res: Response, next: NextFunction):
         t.TaskDescription LIKE @search OR 
         t.Tags LIKE @search OR
         t.RelatedVendor LIKE @search OR
-        t.RelatedCustomer LIKE @search
+        t.RelatedCustomer LIKE @search OR
+        comp.CompanyName LIKE @search
       )`);
       params.search = `%${search}%`;
     }
@@ -103,6 +128,7 @@ export async function getTasks(req: Request, res: Response, next: NextFunction):
       PercentageComplete: 't.PercentageComplete',
       CreatedAt: 't.CreatedAt',
       DepartmentName: 'd.DepartmentName',
+      CompanyName: 'comp.CompanyName',
     };
     const sortCol = allowedSortCols[sortBy as string] || 't.DueDate';
     const orderDir = (sortOrder as string).toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
@@ -112,6 +138,7 @@ export async function getTasks(req: Request, res: Response, next: NextFunction):
       `SELECT COUNT(*) AS Total 
        FROM dbo.Tasks t
        LEFT JOIN dbo.Departments d ON t.DepartmentID = d.DepartmentID
+       LEFT JOIN dbo.Companies comp ON t.CompanyID = comp.CompanyID
        WHERE ${whereSql}`,
       params
     );
@@ -121,7 +148,8 @@ export async function getTasks(req: Request, res: Response, next: NextFunction):
     const query = `
       SELECT 
         t.TaskID, t.TaskNumber, t.CompanyID, t.LocationID, t.DepartmentID, t.CategoryID,
-        t.TaskTitle, t.TaskDescription, t.StartDate, t.DueDate, t.Priority,
+        t.TaskTitle, t.TaskDescription, t.TaskType, t.ReminderDate, t.Remarks,
+        t.StartDate, t.DueDate, t.Priority,
         t.Status,
         CASE 
           WHEN (t.DueDate < CAST(GETDATE() AS DATE) AND t.Status NOT IN ('Completed', 'Cancelled')) THEN 'Overdue'
@@ -131,6 +159,7 @@ export async function getTasks(req: Request, res: Response, next: NextFunction):
         t.ParentTaskID, t.RelatedImportantDateID, t.RelatedVendor, t.RelatedCustomer, t.Tags,
         t.CompletedDate, t.ApprovedByID, t.ApprovedDate, t.RejectionReason,
         t.CreatedAt, t.UpdatedAt,
+        comp.CompanyName, comp.CompanyCode,
         d.DepartmentName,
         l.LocationName,
         c.CategoryName, c.ColorCode AS CategoryColor, c.RequiresApproval,
@@ -146,6 +175,7 @@ export async function getTasks(req: Request, res: Response, next: NextFunction):
         (SELECT COUNT(*) FROM dbo.TaskComments comm WHERE comm.TaskID = t.TaskID) AS CommentCount,
         DATEDIFF(day, CAST(GETDATE() AS DATE), t.DueDate) AS DaysRemaining
       FROM dbo.Tasks t
+      LEFT JOIN dbo.Companies comp ON t.CompanyID = comp.CompanyID
       LEFT JOIN dbo.Departments d ON t.DepartmentID = d.DepartmentID
       LEFT JOIN dbo.Locations l ON t.LocationID = l.LocationID
       LEFT JOIN dbo.TaskCategories c ON t.CategoryID = c.CategoryID
@@ -176,7 +206,6 @@ export async function getTasks(req: Request, res: Response, next: NextFunction):
 export async function getTaskById(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const taskId = parseInt(req.params.id, 10);
-    const companyId = req.user!.companyId;
 
     const taskResult = await executeQuery(
       `SELECT 
@@ -185,6 +214,7 @@ export async function getTaskById(req: Request, res: Response, next: NextFunctio
           WHEN (t.DueDate < CAST(GETDATE() AS DATE) AND t.Status NOT IN ('Completed', 'Cancelled')) THEN 'Overdue'
           ELSE t.Status 
         END AS EffectiveStatus,
+        comp.CompanyName, comp.CompanyCode,
         d.DepartmentName,
         l.LocationName,
         c.CategoryName, c.ColorCode AS CategoryColor, c.RequiresApproval,
@@ -194,6 +224,7 @@ export async function getTaskById(req: Request, res: Response, next: NextFunctio
         id.Title AS RelatedDateTitle, id.ExpiryDate AS RelatedDateExpiry,
         DATEDIFF(day, CAST(GETDATE() AS DATE), t.DueDate) AS DaysRemaining
        FROM dbo.Tasks t
+       LEFT JOIN dbo.Companies comp ON t.CompanyID = comp.CompanyID
        LEFT JOIN dbo.Departments d ON t.DepartmentID = d.DepartmentID
        LEFT JOIN dbo.Locations l ON t.LocationID = l.LocationID
        LEFT JOIN dbo.TaskCategories c ON t.CategoryID = c.CategoryID
@@ -201,7 +232,7 @@ export async function getTaskById(req: Request, res: Response, next: NextFunctio
        LEFT JOIN dbo.Users u ON t.AssignedByID = u.UserID
        LEFT JOIN dbo.Users appr ON t.ApprovedByID = appr.UserID
        LEFT JOIN dbo.ImportantDates id ON t.RelatedImportantDateID = id.ImportantDateID
-        WHERE t.TaskID = @taskId AND t.IsDeleted = 0`,
+       WHERE t.TaskID = @taskId AND t.IsDeleted = 0`,
       { taskId }
     );
 
@@ -211,9 +242,10 @@ export async function getTaskById(req: Request, res: Response, next: NextFunctio
     }
 
     const task = taskResult.recordset[0];
-    const isSuperAdmin = req.tenant?.isSuperAdmin;
-    if (!isSuperAdmin && !req.tenant?.scopeCompanyIds.includes(task.CompanyID)) {
-      res.status(403).json({ success: false, message: 'Forbidden: You do not have access to this company\'s task.' });
+    const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+    const allowedCompanyIds = req.tenant?.allowedCompanyIds || [req.user!.companyId];
+    if (!isSuperAdmin && !allowedCompanyIds.includes(task.CompanyID)) {
+      res.status(403).json({ success: false, message: 'Forbidden: You do not have access to view this company\'s task.' });
       return;
     }
 
@@ -306,11 +338,17 @@ export async function getTaskById(req: Request, res: Response, next: NextFunctio
 
 export async function createTask(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const companyId = req.user!.companyId;
     const userId = req.user!.userId;
     const {
+      companyId,
       title,
+      taskTitle,
       description,
+      taskDescription,
+      taskType = 'General',
+      reminderDate,
+      remarks,
+      status = 'New',
       departmentId,
       locationId,
       categoryId,
@@ -327,10 +365,29 @@ export async function createTask(req: Request, res: Response, next: NextFunction
       relatedCustomer,
     } = req.body;
 
-    if (!title || !dueDate) {
+    const targetCompanyId = companyId ? parseInt(companyId, 10) : null;
+    if (!targetCompanyId || isNaN(targetCompanyId)) {
+      res.status(400).json({ success: false, message: 'Company selection is mandatory. Please select a company.' });
+      return;
+    }
+
+    // Backend Security Verification
+    const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+    const allowedCompanyIds = req.tenant?.allowedCompanyIds || [req.user!.companyId];
+    if (!isSuperAdmin && !allowedCompanyIds.includes(targetCompanyId)) {
+      res.status(403).json({
+        success: false,
+        message: `Forbidden: You do not have permission to create tasks for Company #${targetCompanyId}.`,
+      });
+      return;
+    }
+
+    const effectiveTitle = (title || taskTitle || '').trim();
+    if (!effectiveTitle || !dueDate) {
       res.status(400).json({ success: false, message: 'Task title and due date are required.' });
       return;
     }
+    const effectiveDescription = description || taskDescription || null;
 
     // Generate Sequential Task Number: TSK-YYYY-XXXX
     const currentYear = new Date().getFullYear();
@@ -344,30 +401,36 @@ export async function createTask(req: Request, res: Response, next: NextFunction
     const insertResult = await executeQuery<{ TaskID: number }>(
       `INSERT INTO dbo.Tasks (
         TaskNumber, CompanyID, LocationID, DepartmentID, CategoryID, TaskTitle, TaskDescription,
+        TaskType, ReminderDate, Remarks,
         AssignedByID, ManagerID, StartDate, DueDate, Priority, Status, PercentageComplete,
         EstimatedHours, ActualHours, RelatedImportantDateID, RelatedVendor, RelatedCustomer, Tags,
-        CreatedAt, UpdatedAt
+        CreatedBy, CreatedAt, UpdatedBy, UpdatedAt
       ) 
       OUTPUT INSERTED.TaskID
       VALUES (
-        @taskNumber, @companyId, @locationId, @departmentId, @categoryId, @title, @description,
-        @userId, @managerId, @startDate, @dueDate, @priority, N'New', 0,
+        @taskNumber, @targetCompanyId, @locationId, @departmentId, @categoryId, @title, @description,
+        @taskType, @reminderDate, @remarks,
+        @userId, @managerId, @startDate, @dueDate, @priority, @status, 0,
         @estimatedHours, 0.0, @relatedImportantDateId, @relatedVendor, @relatedCustomer, @tags,
-        SYSUTCDATETIME(), SYSUTCDATETIME()
+        @userId, SYSUTCDATETIME(), @userId, SYSUTCDATETIME()
       )`,
       {
         taskNumber,
-        companyId,
+        targetCompanyId,
         locationId: locationId || null,
         departmentId: departmentId || null,
         categoryId: categoryId || null,
-        title: title.trim(),
-        description: description || null,
+        title: effectiveTitle,
+        description: effectiveDescription,
+        taskType: taskType || 'General',
+        reminderDate: reminderDate || null,
+        remarks: remarks || null,
         userId,
         managerId: managerId || null,
         startDate: startDate || null,
         dueDate,
-        priority,
+        priority: priority || 'Medium',
+        status: status || 'New',
         estimatedHours: parseFloat(estimatedHours) || 0,
         relatedImportantDateId: relatedImportantDateId || null,
         relatedVendor: relatedVendor || null,
@@ -440,7 +503,7 @@ export async function createTask(req: Request, res: Response, next: NextFunction
       message: `Task ${taskNumber} created successfully.`,
       taskId: newTaskId,
       taskNumber,
-      data: { TaskID: newTaskId, TaskNumber: taskNumber },
+      data: { taskId: newTaskId, TaskID: newTaskId, taskNumber, TaskNumber: taskNumber },
     });
   } catch (err) {
     next(err);
@@ -450,11 +513,14 @@ export async function createTask(req: Request, res: Response, next: NextFunction
 export async function updateTask(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const taskId = parseInt(req.params.id, 10);
-    const companyId = req.user!.companyId;
     const userId = req.user!.userId;
     const {
+      companyId,
       title,
       description,
+      taskType,
+      reminderDate,
+      remarks,
       departmentId,
       locationId,
       categoryId,
@@ -483,16 +549,35 @@ export async function updateTask(req: Request, res: Response, next: NextFunction
     }
 
     const old = existingTask.recordset[0];
-    const isSuperAdmin = req.tenant?.isSuperAdmin;
-    if (!isSuperAdmin && !req.tenant?.scopeCompanyIds.includes(old.CompanyID)) {
+    const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+    const allowedCompanyIds = req.tenant?.allowedCompanyIds || [req.user!.companyId];
+
+    if (!isSuperAdmin && !allowedCompanyIds.includes(old.CompanyID)) {
       res.status(403).json({ success: false, message: 'Forbidden: You do not have permission to update this company\'s task.' });
       return;
     }
 
+    let targetCompanyId = old.CompanyID;
+    if (companyId) {
+      const parsedCompId = parseInt(companyId, 10);
+      if (!isSuperAdmin && !allowedCompanyIds.includes(parsedCompId)) {
+        res.status(403).json({
+          success: false,
+          message: `Forbidden: You do not have permission to assign this task to Company #${parsedCompId}.`,
+        });
+        return;
+      }
+      targetCompanyId = parsedCompId;
+    }
+
     await executeQuery(
       `UPDATE dbo.Tasks SET
+        CompanyID = @targetCompanyId,
         TaskTitle = ISNULL(@title, TaskTitle),
         TaskDescription = ISNULL(@description, TaskDescription),
+        TaskType = ISNULL(@taskType, TaskType),
+        ReminderDate = @reminderDate,
+        Remarks = ISNULL(@remarks, Remarks),
         DepartmentID = @departmentId,
         LocationID = @locationId,
         CategoryID = @categoryId,
@@ -507,12 +592,17 @@ export async function updateTask(req: Request, res: Response, next: NextFunction
         Tags = @tags,
         RelatedVendor = @relatedVendor,
         RelatedCustomer = @relatedCustomer,
+        UpdatedBy = @userId,
         UpdatedAt = SYSUTCDATETIME()
        WHERE TaskID = @taskId`,
       {
         taskId,
+        targetCompanyId,
         title: title || null,
         description: description !== undefined ? description : null,
+        taskType: taskType || null,
+        reminderDate: reminderDate !== undefined ? (reminderDate || null) : old.ReminderDate,
+        remarks: remarks !== undefined ? remarks : null,
         departmentId: departmentId || null,
         locationId: locationId || null,
         categoryId: categoryId || null,
@@ -527,6 +617,7 @@ export async function updateTask(req: Request, res: Response, next: NextFunction
         tags: tags || null,
         relatedVendor: relatedVendor || null,
         relatedCustomer: relatedCustomer || null,
+        userId,
       }
     );
 
@@ -599,7 +690,7 @@ export async function updateProgress(req: Request, res: Response, next: NextFunc
     }
 
     const taskResult = await executeQuery(
-      `SELECT TaskID, Status, PercentageComplete, ActualHours, TaskNumber, TaskTitle, ManagerID 
+      `SELECT TaskID, CompanyID, Status, PercentageComplete, ActualHours, TaskNumber, TaskTitle, ManagerID 
        FROM dbo.Tasks WHERE TaskID = @taskId AND IsDeleted = 0`,
       { taskId }
     );
@@ -610,6 +701,12 @@ export async function updateProgress(req: Request, res: Response, next: NextFunc
     }
 
     const task = taskResult.recordset[0];
+    const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+    const allowedCompanyIds = req.tenant?.allowedCompanyIds || [req.user!.companyId];
+    if (!isSuperAdmin && !allowedCompanyIds.includes(task.CompanyID)) {
+      res.status(403).json({ success: false, message: 'Forbidden: You do not have permission to update progress for this company\'s task.' });
+      return;
+    }
     const prevStatus = task.Status;
     const prevProgress = task.PercentageComplete;
     const newStatus = status || prevStatus;
@@ -712,6 +809,21 @@ export async function addComment(req: Request, res: Response, next: NextFunction
       return;
     }
 
+    const taskCheck = await executeQuery<any>(
+      `SELECT TaskID, CompanyID FROM dbo.Tasks WHERE TaskID = @taskId AND IsDeleted = 0`,
+      { taskId }
+    );
+    if (taskCheck.recordset.length === 0) {
+      res.status(404).json({ success: false, message: 'Task not found.' });
+      return;
+    }
+    const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+    const allowedCompanyIds = req.tenant?.allowedCompanyIds || [req.user!.companyId];
+    if (!isSuperAdmin && !allowedCompanyIds.includes(taskCheck.recordset[0].CompanyID)) {
+      res.status(403).json({ success: false, message: 'Forbidden: You do not have access to comment on this company\'s task.' });
+      return;
+    }
+
     const insertResult = await executeQuery<{ CommentID: number }>(
       `INSERT INTO dbo.TaskComments (TaskID, UserID, CommentText, MentionedUserIDs, CreatedAt, UpdatedAt)
        OUTPUT INSERTED.CommentID
@@ -765,6 +877,21 @@ export async function uploadTaskAttachment(req: Request, res: Response, next: Ne
       return;
     }
 
+    const taskCheck = await executeQuery<any>(
+      `SELECT TaskID, CompanyID FROM dbo.Tasks WHERE TaskID = @taskId AND IsDeleted = 0`,
+      { taskId }
+    );
+    if (taskCheck.recordset.length === 0) {
+      res.status(404).json({ success: false, message: 'Task not found.' });
+      return;
+    }
+    const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+    const allowedCompanyIds = req.tenant?.allowedCompanyIds || [req.user!.companyId];
+    if (!isSuperAdmin && !allowedCompanyIds.includes(taskCheck.recordset[0].CompanyID)) {
+      res.status(403).json({ success: false, message: 'Forbidden: You do not have access to upload attachments for this company\'s task.' });
+      return;
+    }
+
     const insertResult = await executeQuery<{ AttachmentID: number }>(
       `INSERT INTO dbo.TaskAttachments (
         TaskID, FileName, OriginalName, FileType, FileSize, StoragePath, UploadedByUserID, CreatedAt
@@ -811,7 +938,7 @@ export async function approveTask(req: Request, res: Response, next: NextFunctio
     const userId = req.user!.userId;
 
     const taskResult = await executeQuery(
-      `SELECT TaskID, TaskNumber, TaskTitle, Status FROM dbo.Tasks WHERE TaskID = @taskId AND IsDeleted = 0`,
+      `SELECT TaskID, CompanyID, TaskNumber, TaskTitle, Status FROM dbo.Tasks WHERE TaskID = @taskId AND IsDeleted = 0`,
       { taskId }
     );
 
@@ -821,6 +948,12 @@ export async function approveTask(req: Request, res: Response, next: NextFunctio
     }
 
     const task = taskResult.recordset[0];
+    const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+    const allowedCompanyIds = req.tenant?.allowedCompanyIds || [req.user!.companyId];
+    if (!isSuperAdmin && !allowedCompanyIds.includes(task.CompanyID)) {
+      res.status(403).json({ success: false, message: 'Forbidden: You do not have permission to review this company\'s task.' });
+      return;
+    }
 
     await executeQuery(
       `UPDATE dbo.Tasks SET
@@ -887,7 +1020,7 @@ export async function rejectTask(req: Request, res: Response, next: NextFunction
     }
 
     const taskResult = await executeQuery(
-      `SELECT TaskID, TaskNumber, TaskTitle, Status FROM dbo.Tasks WHERE TaskID = @taskId AND IsDeleted = 0`,
+      `SELECT TaskID, CompanyID, TaskNumber, TaskTitle, Status FROM dbo.Tasks WHERE TaskID = @taskId AND IsDeleted = 0`,
       { taskId }
     );
 
@@ -897,6 +1030,12 @@ export async function rejectTask(req: Request, res: Response, next: NextFunction
     }
 
     const task = taskResult.recordset[0];
+    const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+    const allowedCompanyIds = req.tenant?.allowedCompanyIds || [req.user!.companyId];
+    if (!isSuperAdmin && !allowedCompanyIds.includes(task.CompanyID)) {
+      res.status(403).json({ success: false, message: 'Forbidden: You do not have permission to review this company\'s task.' });
+      return;
+    }
 
     await executeQuery(
       `UPDATE dbo.Tasks SET
@@ -957,7 +1096,6 @@ export async function bulkTaskAction(req: Request, res: Response, next: NextFunc
   try {
     const { taskIds, action, value } = req.body;
     const userId = req.user!.userId;
-    const companyId = req.user!.companyId;
 
     if (!Array.isArray(taskIds) || taskIds.length === 0) {
       res.status(400).json({ success: false, message: 'Please select at least one task.' });
@@ -966,12 +1104,16 @@ export async function bulkTaskAction(req: Request, res: Response, next: NextFunc
 
     const validIds = taskIds.map((id: any) => parseInt(id, 10)).filter((id: number) => !isNaN(id));
 
+    const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+    const allowedCompanyIds = req.tenant?.allowedCompanyIds || [req.user!.companyId];
+    const compFilter = isSuperAdmin ? '' : ` AND CompanyID IN (${allowedCompanyIds.join(', ')})`;
+
     if (action === 'status') {
       for (const id of validIds) {
         await executeQuery(
           `UPDATE dbo.Tasks SET Status = @value, UpdatedAt = SYSUTCDATETIME() 
-           WHERE TaskID = @id AND CompanyID = @companyId`,
-          { value, id, companyId }
+           WHERE TaskID = @id ${compFilter}`,
+          { value, id }
         );
         await executeQuery(
           `INSERT INTO dbo.TaskActivityLog (TaskID, UserID, ActionType, Description)
@@ -983,16 +1125,16 @@ export async function bulkTaskAction(req: Request, res: Response, next: NextFunc
       for (const id of validIds) {
         await executeQuery(
           `UPDATE dbo.Tasks SET Priority = @value, UpdatedAt = SYSUTCDATETIME() 
-           WHERE TaskID = @id AND CompanyID = @companyId`,
-          { value, id, companyId }
+           WHERE TaskID = @id ${compFilter}`,
+          { value, id }
         );
       }
     } else if (action === 'delete') {
       for (const id of validIds) {
         await executeQuery(
           `UPDATE dbo.Tasks SET IsDeleted = 1, UpdatedAt = SYSUTCDATETIME() 
-           WHERE TaskID = @id AND CompanyID = @companyId`,
-          { id, companyId }
+           WHERE TaskID = @id ${compFilter}`,
+          { id }
         );
       }
     } else if (action === 'assign') {
@@ -1036,8 +1178,9 @@ export async function deleteTask(req: Request, res: Response, next: NextFunction
     }
 
     const task = existingTask.recordset[0];
-    const isSuperAdmin = req.tenant?.isSuperAdmin;
-    if (!isSuperAdmin && !req.tenant?.scopeCompanyIds.includes(task.CompanyID)) {
+    const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+    const allowedCompanyIds = req.tenant?.allowedCompanyIds || [req.user!.companyId];
+    if (!isSuperAdmin && !allowedCompanyIds.includes(task.CompanyID)) {
       res.status(403).json({ success: false, message: 'Forbidden: You do not have permission to delete this company\'s task.' });
       return;
     }

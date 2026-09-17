@@ -283,6 +283,11 @@ export interface TaskItem {
   TaskID: number;
   TaskNumber: string;
   CompanyID: number;
+  CompanyName?: string;
+  CompanyCode?: string;
+  TaskType?: string;
+  ReminderDate?: string;
+  Remarks?: string;
   LocationID?: number;
   LocationName?: string;
   DepartmentID?: number;
@@ -476,4 +481,49 @@ export interface DashboardData {
   upcomingDates: ImportantDateItem[];
   overdueTasks: any[];
   myDayTasks: any[];
+}
+
+export interface UserCompanyRightsUser {
+  UserID: number;
+  Username: string;
+  Email: string;
+  RoleID: number;
+  RoleName: string;
+  PrimaryCompanyID: number;
+  PrimaryCompanyName?: string;
+  PrimaryCompanyCode?: string;
+  EmployeeName?: string;
+  Designation?: string;
+  AssignedCompanyCount: number;
+}
+
+export interface CompanyRightItem {
+  companyId: number;
+  companyCode: string;
+  companyName: string;
+  legalName?: string;
+  companyType: string;
+  parentCompanyId?: number | null;
+  parentCompanyName?: string | null;
+  isAssigned: boolean;
+  isPrimary: boolean;
+}
+
+export interface UserCompanyRightsData {
+  user: {
+    userId: number;
+    username: string;
+    email: string;
+    roleId: number;
+    roleName: string;
+    employeeName?: string;
+    designation?: string;
+    primaryCompanyId: number;
+  };
+  companies: CompanyRightItem[];
+}
+
+export interface SaveUserCompanyRightsPayload {
+  companyIds: number[];
+  primaryCompanyId?: number;
 }

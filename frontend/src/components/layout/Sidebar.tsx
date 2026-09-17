@@ -9,6 +9,7 @@ import {
   Users,
   Settings,
   ShieldAlert,
+  ShieldCheck,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -92,6 +93,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Masters & Staff',
       icon: <Users className="w-5 h-5" />,
       allowed: hasPermission('masters.manage'),
+    },
+    {
+      to: '/user-company-rights',
+      label: 'User Company Rights',
+      icon: <ShieldCheck className="w-5 h-5 text-emerald-500" />,
+      allowed: isGroupOrSuperAdmin || hasPermission('masters.manage'),
     },
     {
       to: '/audit-logs',
