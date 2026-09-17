@@ -216,8 +216,8 @@ async function saveUserCompanyRights(req, res, next) {
            WHERE UserID = @targetUserId AND CompanyID = @compId`, { targetUserId, compId, isPrimary, roleId: targetUser.RoleID });
             }
             else {
-                await (0, db_1.executeQuery)(`INSERT INTO dbo.UserCompany (UserID, CompanyID, RoleID, AccessScope, IsPrimary, IsActive, CreatedBy, CreatedAt, UpdatedBy, UpdatedAt)
-           VALUES (@targetUserId, @compId, @roleId, N'Own', @isPrimary, 1, @adminUserId, SYSUTCDATETIME(), @adminUserId, SYSUTCDATETIME())`, { targetUserId, compId, roleId: targetUser.RoleID, isPrimary, adminUserId });
+                await (0, db_1.executeQuery)(`INSERT INTO dbo.UserCompany (UserID, CompanyID, RoleID, AccessScope, IsPrimary, IsActive, CreatedAt, UpdatedAt)
+           VALUES (@targetUserId, @compId, @roleId, N'Own', @isPrimary, 1, SYSUTCDATETIME(), SYSUTCDATETIME())`, { targetUserId, compId, roleId: targetUser.RoleID, isPrimary });
             }
         }
         // 3. Update primary company in Users and Employees table

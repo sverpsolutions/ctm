@@ -280,9 +280,9 @@ export async function saveUserCompanyRights(req: Request, res: Response, next: N
         );
       } else {
         await executeQuery(
-          `INSERT INTO dbo.UserCompany (UserID, CompanyID, RoleID, AccessScope, IsPrimary, IsActive, CreatedBy, CreatedAt, UpdatedBy, UpdatedAt)
-           VALUES (@targetUserId, @compId, @roleId, N'Own', @isPrimary, 1, @adminUserId, SYSUTCDATETIME(), @adminUserId, SYSUTCDATETIME())`,
-          { targetUserId, compId, roleId: targetUser.RoleID, isPrimary, adminUserId }
+          `INSERT INTO dbo.UserCompany (UserID, CompanyID, RoleID, AccessScope, IsPrimary, IsActive, CreatedAt, UpdatedAt)
+           VALUES (@targetUserId, @compId, @roleId, N'Own', @isPrimary, 1, SYSUTCDATETIME(), SYSUTCDATETIME())`,
+          { targetUserId, compId, roleId: targetUser.RoleID, isPrimary }
         );
       }
     }
