@@ -946,7 +946,8 @@ async function initMysqlSchemaAndSeed() {
       ('Payment Due Date', '#e11d48', 'CreditCard', 1),
       ('Tax Filing Deadline', '#14b8a6', 'Calculator', 1),
       ('Audit Schedule', '#f43f5e', 'ClipboardCheck', 1),
-      ('Compliance Due Date', '#0ea5e9', 'Scale', 1)
+      ('Compliance Due Date', '#0ea5e9', 'Scale', 1),
+      ('Other', '#94a3b8', 'MoreHorizontal', 0)
     `);
         // Default tenant
         await runSql(`INSERT INTO Tenants (TenantID, TenantCode, TenantName, LegalName, ContactPerson, ContactEmail, Industry, City, State, Country, SubscriptionTier, MaxCompanies, MaxUsers, LicenseStartDate, LicenseEndDate, EnabledModules, Status) VALUES
@@ -1707,6 +1708,7 @@ async function initSqliteSchemaAndSeed() {
             ['Domain Renewal', '#0891b2', 'Globe'],
             ['Software License Renewal', '#4f46e5', 'Key'],
             ['Custom Event', '#64748b', 'Tag'],
+            ['Other', '#94a3b8', 'MoreHorizontal'],
         ];
         for (const [name, color, icon] of dateCats) {
             await runSql(`INSERT INTO ImportantDateCategories (CompanyID, CategoryName, ColorCode, IconName, IsSystemDefault, Status) VALUES (1, '${name}', '${color}', '${icon}', 1, 'Active')`);
@@ -1719,7 +1721,8 @@ async function initSqliteSchemaAndSeed() {
       (3, 1, 'Financial & Auditing', '#10b981', 1, 'Active'),
       (4, 1, 'HR & Onboarding', '#f59e0b', 0, 'Active'),
       (5, 1, 'Vendor & Procurement', '#8b5cf6', 1, 'Active'),
-      (6, 1, 'Daily Operations', '#64748b', 0, 'Active');
+      (6, 1, 'Daily Operations', '#64748b', 0, 'Active'),
+      (7, 1, 'Other', '#94a3b8', 0, 'Active');
     `);
         await runSql(`
       INSERT INTO ImportantDates (ImportantDateID, CompanyID, LocationID, DepartmentID, CategoryID, Title, Description, RelatedVendor, ReferenceNumber, Date, StartDate, ExpiryDate, RecurrenceType, ResponsibleEmployeeID, Priority, AutoGenerateTask, LeadDaysForTask, TaskAssignedToID, Status, CreatedBy)
