@@ -19,8 +19,8 @@ import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Input } from '../common/Input';
 import { Select } from '../common/Select';
-import { Department, Employee, TaskTemplate, UserCompanyAccess } from '../../types';
-import { tasksApi, mastersApi } from '../../services/api';
+import { Department, Employee, TaskCategory, TaskTemplate, UserCompanyAccess } from '../../types';
+import { tasksApi, mastersApi, settingsApi } from '../../services/api';
 import { useTenant } from '../../context/TenantContext';
 
 interface TaskFormModalProps {
@@ -63,6 +63,7 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
   const [departments, setDepartments] = useState<Department[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
+  const [categories, setCategories] = useState<TaskCategory[]>([]);
 
   // Company Selector State (Searchable)
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
@@ -74,6 +75,7 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
   const [description, setDescription] = useState('');
   const [taskType, setTaskType] = useState<string>('General');
   const [priority, setPriority] = useState<string>('Medium');
+  const [categoryId, setCategoryId] = useState<string>('');
   const [departmentId, setDepartmentId] = useState<string>('');
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().substring(0, 10));
   const [dueDate, setDueDate] = useState<string>('');
@@ -117,6 +119,7 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
       setDescription('');
       setTaskType('General');
       setPriority('Medium');
+      setCategoryId('');
       setDepartmentId('');
       setStatus('New');
       setRemarks('');
@@ -138,13 +141,14 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
     const compIdNum = parseInt(selectedCompanyId, 10);
     if (isNaN(compIdNum)) return;
 
-    // Fetch company-specific departments and employees
+    // Fetch company-specific departments, employees, and categories
     Promise.all([
       mastersApi.getDepartments(),
       mastersApi.getEmployees(),
       tasksApi.getTemplates().catch(() => ({ data: [] })),
+      settingsApi.getSettings().catch(() => ({ data: { taskCategories: [] } })),
     ])
-      .then(([deptRes, empRes, tmplRes]) => {
+      .then(([deptRes, empRes, tmplRes, settingsRes]) => {
         const allDepts: Department[] = deptRes.data || [];
         const allEmps: Employee[] = empRes.data || [];
 
@@ -155,6 +159,7 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
         setDepartments(filteredDepts.length > 0 ? filteredDepts : allDepts);
         setEmployees(filteredEmps.length > 0 ? filteredEmps : allEmps);
         setTemplates(tmplRes.data || []);
+        setCategories(settingsRes.data?.taskCategories || []);
 
         // Clear previous department/assignee if not in new company
         setDepartmentId('');
@@ -256,6 +261,7 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
         title: title.trim(),
         description: description.trim(),
         taskType: taskType || 'General',
+        categoryId: categoryId ? parseInt(categoryId, 10) : null,
         reminderDate: reminderDate || null,
         remarks: remarks.trim() || null,
         status: status || 'New',
@@ -488,8 +494,21 @@ export const TaskFormModal: React.FC<TaskFormModalProps> = ({
           </Select>
         </div>
 
-        {/* 5. ROW: Department, Estimated Hours */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* 5. ROW: Category, Department, Estimated Hours */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Select
+            label="Category"
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value)}
+          >
+            <option value="">Select Category (Optional)...</option>
+            {categories.map((c) => (
+              <option key={c.CategoryID} value={c.CategoryID}>
+                {c.CategoryName}
+              </option>
+            ))}
+          </Select>
+
           <Select
             label="Department"
             value={departmentId}
