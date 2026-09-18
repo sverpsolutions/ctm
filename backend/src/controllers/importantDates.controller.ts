@@ -100,8 +100,11 @@ export async function getImportantDates(req: Request, res: Response, next: NextF
         relE.EmployeeName AS RelatedEmployeeName,
         dep.DepartmentName,
         l.LocationName,
+        gt.TaskNumber AS GeneratedTaskNumber,
+        gt.Status AS GeneratedTaskStatus,
+        gt.TaskTitle AS GeneratedTaskTitle,
         DATEDIFF(day, CAST(GETDATE() AS DATE), ISNULL(d.ExpiryDate, d.Date)) AS DaysRemaining,
-        CASE 
+        CASE
           WHEN ISNULL(d.ExpiryDate, d.Date) < CAST(GETDATE() AS DATE) THEN 'Expired'
           WHEN DATEDIFF(day, CAST(GETDATE() AS DATE), ISNULL(d.ExpiryDate, d.Date)) BETWEEN 0 AND 3 THEN 'Critical'
           WHEN DATEDIFF(day, CAST(GETDATE() AS DATE), ISNULL(d.ExpiryDate, d.Date)) BETWEEN 4 AND 7 THEN 'Urgent'
@@ -114,6 +117,7 @@ export async function getImportantDates(req: Request, res: Response, next: NextF
        LEFT JOIN dbo.Employees relE ON d.RelatedEmployeeID = relE.EmployeeID
        LEFT JOIN dbo.Departments dep ON d.DepartmentID = dep.DepartmentID
        LEFT JOIN dbo.Locations l ON d.LocationID = l.LocationID
+       LEFT JOIN dbo.Tasks gt ON d.GeneratedTaskID = gt.TaskID
        WHERE ${whereSql}
        ORDER BY ${sortField} ${orderDir}
        OFFSET @offset ROWS FETCH NEXT @limitNum ROWS ONLY`,

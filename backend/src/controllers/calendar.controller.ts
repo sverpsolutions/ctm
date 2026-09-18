@@ -75,15 +75,20 @@ export async function getCalendarEvents(req: Request, res: Response, next: NextF
       }
 
       const datesResult = await executeQuery(
-        `SELECT 
+        `SELECT
           d.ImportantDateID, d.Title, d.Date, d.ExpiryDate, d.Priority, d.Status,
+          d.GeneratedTaskID, d.AutoGenerateTask,
           c.CategoryName, c.ColorCode, c.IconName,
           dep.DepartmentName,
-          e.EmployeeName AS ResponsiblePerson
+          e.EmployeeName AS ResponsiblePerson,
+          gt.TaskNumber AS GeneratedTaskNumber,
+          gt.Status AS GeneratedTaskStatus,
+          gt.TaskTitle AS GeneratedTaskTitle
          FROM dbo.ImportantDates d
          JOIN dbo.ImportantDateCategories c ON d.CategoryID = c.CategoryID
          LEFT JOIN dbo.Departments dep ON d.DepartmentID = dep.DepartmentID
          LEFT JOIN dbo.Employees e ON d.ResponsibleEmployeeID = e.EmployeeID
+         LEFT JOIN dbo.Tasks gt ON d.GeneratedTaskID = gt.TaskID
          WHERE ${dateWhere}`,
         dateParams
       );
@@ -92,10 +97,14 @@ export async function getCalendarEvents(req: Request, res: Response, next: NextF
         const rawDate = d.ExpiryDate || d.Date;
         const targetDate = rawDate instanceof Date ? rawDate.toISOString().substring(0, 10) : String(rawDate).substring(0, 10);
 
+        const taskStatus = d.GeneratedTaskStatus || null;
+        const isDone = taskStatus === 'Completed';
+        const titlePrefix = isDone ? '✅' : taskStatus ? '⏳' : '📌';
+
         events.push({
           id: `date-${d.ImportantDateID}`,
           referenceId: d.ImportantDateID,
-          title: `📌 ${d.Title}`,
+          title: `${titlePrefix} ${d.Title}`,
           start: targetDate,
           end: targetDate,
           type: 'date',
@@ -104,7 +113,11 @@ export async function getCalendarEvents(req: Request, res: Response, next: NextF
           department: d.DepartmentName,
           category: d.CategoryName,
           responsiblePerson: d.ResponsiblePerson,
-          color: d.ColorCode || '#8b5cf6',
+          color: isDone ? '#10b981' : d.ColorCode || '#8b5cf6',
+          generatedTaskId: d.GeneratedTaskID || null,
+          generatedTaskNumber: d.GeneratedTaskNumber || null,
+          generatedTaskStatus: taskStatus,
+          autoGenerateTask: d.AutoGenerateTask,
         });
       }
     }

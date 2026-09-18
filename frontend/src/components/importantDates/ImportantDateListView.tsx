@@ -187,7 +187,22 @@ export const ImportantDateListView: React.FC<ImportantDateListViewProps> = ({
                     </td>
 
                     <td className="py-3.5 px-3 whitespace-nowrap">
-                      {d.AutoGenerateTask ? (
+                      {d.GeneratedTaskStatus ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded inline-block w-fit ${
+                            d.GeneratedTaskStatus === 'Completed'
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              : d.GeneratedTaskStatus === 'Overdue'
+                              ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                              : d.GeneratedTaskStatus === 'In Progress'
+                              ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+                              : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                          }`}>
+                            {d.GeneratedTaskStatus === 'Completed' ? '✅ Done' : d.GeneratedTaskStatus}
+                          </span>
+                          <span className="text-[9px] text-slate-400">{d.GeneratedTaskNumber}</span>
+                        </div>
+                      ) : d.AutoGenerateTask ? (
                         <span className="text-[10px] font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded">
                           Auto ({d.LeadDaysForTask}d)
                         </span>

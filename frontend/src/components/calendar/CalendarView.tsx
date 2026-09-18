@@ -255,6 +255,25 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onEventClick }) => {
                       {event.department && `${event.department} • `}
                       {event.category || event.type}
                     </p>
+                    {event.type === 'date' && event.generatedTaskNumber && (
+                      <p className="text-[10px] mt-0.5 flex items-center gap-1">
+                        <span className="text-slate-400">Task:</span>
+                        <span className={`font-bold ${
+                          event.generatedTaskStatus === 'Completed'
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : event.generatedTaskStatus === 'Overdue'
+                            ? 'text-rose-600 dark:text-rose-400'
+                            : 'text-amber-600 dark:text-amber-400'
+                        }`}>
+                          {event.generatedTaskNumber} — {event.generatedTaskStatus === 'Completed' ? 'Done' : event.generatedTaskStatus}
+                        </span>
+                      </p>
+                    )}
+                    {event.type === 'date' && event.autoGenerateTask && !event.generatedTaskNumber && (
+                      <p className="text-[10px] mt-0.5 text-slate-400 italic">
+                        Task will be auto-created
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -265,6 +284,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onEventClick }) => {
                   {event.priority && (
                     <span className="text-[10px] font-semibold text-slate-400">
                       Priority: {event.priority}
+                    </span>
+                  )}
+                  {event.type === 'date' && event.generatedTaskStatus && (
+                    <span className={`text-[10px] font-bold block mt-0.5 ${
+                      event.generatedTaskStatus === 'Completed'
+                        ? 'text-emerald-600'
+                        : 'text-amber-600'
+                    }`}>
+                      {event.generatedTaskStatus === 'Completed' ? '✅ Task Done' : '⏳ Task ' + event.generatedTaskStatus}
                     </span>
                   )}
                 </div>

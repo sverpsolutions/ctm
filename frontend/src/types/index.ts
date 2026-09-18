@@ -417,6 +417,9 @@ export interface ImportantDateItem {
   LeadDaysForTask: number;
   TaskAssignedToID?: number;
   GeneratedTaskID?: number;
+  GeneratedTaskNumber?: string;
+  GeneratedTaskStatus?: string;
+  GeneratedTaskTitle?: string;
   Status: 'Active' | 'Expired' | 'Renewed' | 'Completed' | 'Cancelled';
   DaysRemaining: number;
   SmartCategory: 'Critical' | 'Urgent' | 'Upcoming' | 'Future' | 'Expired';
@@ -442,6 +445,10 @@ export interface CalendarEventItem {
   category?: string;
   responsiblePerson?: string;
   color: string;
+  generatedTaskId?: number;
+  generatedTaskNumber?: string;
+  generatedTaskStatus?: string;
+  autoGenerateTask?: boolean | number;
 }
 
 export interface NotificationItem {
