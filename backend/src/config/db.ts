@@ -770,7 +770,7 @@ async function initMysqlSchemaAndSeed() {
       SELECT 
         TaskID AS id,
         CompanyID AS company_id,
-        COALESCE(TaskTitle, Title) AS task_title,
+        TaskTitle AS task_title,
         TaskDescription AS task_description,
         TaskType AS task_type,
         Priority AS priority,

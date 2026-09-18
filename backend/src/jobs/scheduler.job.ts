@@ -130,7 +130,7 @@ export async function runDailyMaintenanceJob(): Promise<void> {
           await sendNotification({
             userId: respUser.recordset[0].UserID,
             title: `Important Date Reminder: ${d.Title}`,
-            message: `"${d.Title}" ${daysMsg} (${d.ExpiryDate.toISOString().substring(0, 10)}). Please initiate required renewals.`,
+            message: `"${d.Title}" ${daysMsg} (${(d.ExpiryDate instanceof Date ? d.ExpiryDate.toISOString() : String(d.ExpiryDate)).substring(0, 10)}). Please initiate required renewals.`,
             type: 'DateApproaching',
             referenceType: 'ImportantDate',
             referenceId: d.ImportantDateID,
@@ -188,7 +188,7 @@ export async function runDailyMaintenanceJob(): Promise<void> {
           loc: at.LocationID || null,
           dept: at.DepartmentID || null,
           title: `Action Required: Renew ${at.Title}`,
-          desc: `Automated task generated for upcoming date: "${at.Title}". Due date: ${at.ExpiryDate.toISOString().substring(0, 10)}.`,
+          desc: `Automated task generated for upcoming date: "${at.Title}". Due date: ${(at.ExpiryDate instanceof Date ? at.ExpiryDate.toISOString() : String(at.ExpiryDate)).substring(0, 10)}.`,
           dueDate: at.ExpiryDate,
           dateId: at.ImportantDateID,
         }
