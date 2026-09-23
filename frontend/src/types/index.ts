@@ -388,6 +388,8 @@ export interface ImportantDateHistoryItem {
 export interface ImportantDateItem {
   ImportantDateID: number;
   CompanyID: number;
+  CompanyName?: string;
+  CompanyCode?: string;
   LocationID?: number;
   LocationName?: string;
   DepartmentID?: number;

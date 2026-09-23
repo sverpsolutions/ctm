@@ -4,6 +4,7 @@ import {
   Clock,
   User,
   Building,
+  Building2,
   RefreshCw,
   FileText,
   ShieldCheck,
@@ -59,7 +60,18 @@ export const DateDetailModal: React.FC<DateDetailModalProps> = ({
           {/* Header */}
           <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {(dateItem.CompanyName || dateItem.CompanyCode) && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                    <Building2 className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />
+                    <span>{dateItem.CompanyName}</span>
+                    {dateItem.CompanyCode && (
+                      <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200">
+                        {dateItem.CompanyCode}
+                      </span>
+                    )}
+                  </span>
+                )}
                 <span
                   className="px-2.5 py-1 rounded-lg text-xs font-bold"
                   style={{
@@ -106,6 +118,14 @@ export const DateDetailModal: React.FC<DateDetailModalProps> = ({
 
           {/* Key Details Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/60 dark:border-slate-800 space-y-1">
+              <span className="text-slate-400 font-semibold block">Company Context</span>
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
+                <Building2 className="w-4 h-4 text-indigo-500" />
+                {dateItem.CompanyName || dateItem.CompanyCode || `Company #${dateItem.CompanyID}`}
+              </div>
+            </div>
+
             <div className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/60 dark:border-slate-800 space-y-1">
               <span className="text-slate-400 font-semibold block">Expiry / Event Date</span>
               <div className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">

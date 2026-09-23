@@ -12,16 +12,28 @@ const db_1 = require("../config/db");
 const audit_service_1 = require("../services/audit.service");
 async function getImportantDates(req, res, next) {
     try {
-        const companyId = req.user.companyId;
-        const { page = '1', limit = '25', search, categoryId, departmentId, locationId, status, timeframe, // critical (0-3d), urgent (4-7d), upcoming (8-30d), future (31+d), expired, all
+        const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+        const allowedCompanyIds = req.tenant?.allowedCompanyIds || req.tenant?.scopeCompanyIds || [req.user.companyId];
+        const { page = '1', limit = '25', companyId: filterCompanyId, search, categoryId, departmentId, locationId, status, timeframe, // critical (0-3d), urgent (4-7d), upcoming (8-30d), future (31+d), expired, all
         sortBy = 'ExpiryDate', sortOrder = 'ASC', } = req.query;
         const pageNum = Math.max(1, parseInt(page, 10) || 1);
         const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
         const offset = (pageNum - 1) * limitNum;
-        const scopeIds = req.tenant?.scopeCompanyIds || [req.user.companyId];
-        const dScope = scopeIds.length === 1 ? `d.CompanyID = ${scopeIds[0]}` : `d.CompanyID IN (${scopeIds.join(', ')})`;
-        let whereClauses = [dScope, 'd.IsDeleted = 0'];
+        let whereClauses = ['d.IsDeleted = 0'];
         const params = { limitNum, offset };
+        // Company Scoping / Filtering
+        if (filterCompanyId) {
+            const targetCid = parseInt(filterCompanyId, 10);
+            if (!isSuperAdmin && !allowedCompanyIds.includes(targetCid)) {
+                res.status(403).json({ success: false, message: `Forbidden: You do not have access to Company #${targetCid}.` });
+                return;
+            }
+            whereClauses.push(`d.CompanyID = @targetCid`);
+            params.targetCid = targetCid;
+        }
+        else if (!isSuperAdmin) {
+            whereClauses.push(`d.CompanyID IN (${allowedCompanyIds.join(', ')})`);
+        }
         if (search) {
             whereClauses.push(`(
         d.Title LIKE @search OR 
@@ -68,10 +80,11 @@ async function getImportantDates(req, res, next) {
         // Total Count
         const countResult = await (0, db_1.executeQuery)(`SELECT COUNT(*) AS Total 
        FROM dbo.ImportantDates d
+       LEFT JOIN dbo.Companies comp ON d.CompanyID = comp.CompanyID
        WHERE ${whereSql}`, params);
         const totalRecords = countResult.recordset[0]?.Total || 0;
         // Sorting
-        const sortField = sortBy === 'Title' ? 'd.Title' : sortBy === 'Date' ? 'd.Date' : 'ISNULL(d.ExpiryDate, d.Date)';
+        const sortField = sortBy === 'Title' ? 'd.Title' : sortBy === 'Date' ? 'd.Date' : sortBy === 'CompanyName' ? 'comp.CompanyName' : 'ISNULL(d.ExpiryDate, d.Date)';
         const orderDir = sortOrder.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
         const dataResult = await (0, db_1.executeQuery)(`SELECT 
         d.ImportantDateID, d.CompanyID, d.LocationID, d.DepartmentID, d.CategoryID,
@@ -80,6 +93,7 @@ async function getImportantDates(req, res, next) {
         d.ResponsibleEmployeeID, d.Priority, d.Attachment, d.Notes,
         d.AutoGenerateTask, d.LeadDaysForTask, d.TaskAssignedToID, d.GeneratedTaskID,
         d.Status, d.CreatedAt, d.UpdatedAt,
+        comp.CompanyName, comp.CompanyCode,
         c.CategoryName, c.ColorCode AS CategoryColor, c.IconName AS CategoryIcon,
         e.EmployeeName AS ResponsiblePersonName, e.Email AS ResponsiblePersonEmail,
         relE.EmployeeName AS RelatedEmployeeName,
@@ -97,6 +111,7 @@ async function getImportantDates(req, res, next) {
           ELSE 'Future'
         END AS SmartCategory
        FROM dbo.ImportantDates d
+       LEFT JOIN dbo.Companies comp ON d.CompanyID = comp.CompanyID
        JOIN dbo.ImportantDateCategories c ON d.CategoryID = c.CategoryID
        LEFT JOIN dbo.Employees e ON d.ResponsibleEmployeeID = e.EmployeeID
        LEFT JOIN dbo.Employees relE ON d.RelatedEmployeeID = relE.EmployeeID
@@ -124,9 +139,9 @@ async function getImportantDates(req, res, next) {
 async function getImportantDateById(req, res, next) {
     try {
         const id = parseInt(req.params.id, 10);
-        const companyId = req.user.companyId;
         const dateResult = await (0, db_1.executeQuery)(`SELECT 
         d.*,
+        comp.CompanyName, comp.CompanyCode,
         c.CategoryName, c.ColorCode AS CategoryColor, c.IconName AS CategoryIcon,
         e.EmployeeName AS ResponsiblePersonName, e.Email AS ResponsiblePersonEmail,
         relE.EmployeeName AS RelatedEmployeeName,
@@ -135,6 +150,7 @@ async function getImportantDateById(req, res, next) {
         u.Username AS CreatedByUsername,
         DATEDIFF(day, CAST(GETDATE() AS DATE), ISNULL(d.ExpiryDate, d.Date)) AS DaysRemaining
        FROM dbo.ImportantDates d
+       LEFT JOIN dbo.Companies comp ON d.CompanyID = comp.CompanyID
        JOIN dbo.ImportantDateCategories c ON d.CategoryID = c.CategoryID
        LEFT JOIN dbo.Employees e ON d.ResponsibleEmployeeID = e.EmployeeID
        LEFT JOIN dbo.Employees relE ON d.RelatedEmployeeID = relE.EmployeeID
@@ -147,8 +163,9 @@ async function getImportantDateById(req, res, next) {
             return;
         }
         const dateRecord = dateResult.recordset[0];
-        const isSuperAdmin = req.tenant?.isSuperAdmin;
-        if (!isSuperAdmin && !req.tenant?.scopeCompanyIds.includes(dateRecord.CompanyID)) {
+        const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+        const allowedCompanyIds = req.tenant?.allowedCompanyIds || req.tenant?.scopeCompanyIds || [req.user.companyId];
+        if (!isSuperAdmin && !allowedCompanyIds.includes(dateRecord.CompanyID)) {
             res.status(403).json({ success: false, message: 'Forbidden: You do not have access to this company\'s important date.' });
             return;
         }
@@ -181,10 +198,23 @@ async function getImportantDateById(req, res, next) {
 }
 async function createImportantDate(req, res, next) {
     try {
-        const companyId = req.user.companyId;
         const userId = req.user.userId;
-        const { categoryId, title, description, locationId, departmentId, relatedEmployeeId, relatedVendor, relatedCustomer, referenceNumber, date, startDate, expiryDate, recurrenceType = 'Does Not Repeat', responsibleEmployeeId, priority = 'Medium', notes, attachment, autoGenerateTask = false, leadDaysForTask = 15, taskAssignedToId, reminders = [30, 15, 7, 1], // default reminder days
+        const { companyId, categoryId, title, description, locationId, departmentId, relatedEmployeeId, relatedVendor, relatedCustomer, referenceNumber, date, startDate, expiryDate, recurrenceType = 'Does Not Repeat', responsibleEmployeeId, priority = 'Medium', notes, attachment, autoGenerateTask = false, leadDaysForTask = 15, taskAssignedToId, reminders = [30, 15, 7, 1], // default reminder days
          } = req.body;
+        const targetCompanyId = companyId ? parseInt(companyId, 10) : null;
+        if (!targetCompanyId || isNaN(targetCompanyId)) {
+            res.status(400).json({ success: false, message: 'Company selection is mandatory. Please select a company.' });
+            return;
+        }
+        const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+        const allowedCompanyIds = req.tenant?.allowedCompanyIds || req.tenant?.scopeCompanyIds || [req.user.companyId];
+        if (!isSuperAdmin && !allowedCompanyIds.includes(targetCompanyId)) {
+            res.status(403).json({
+                success: false,
+                message: `Forbidden: You do not have permission to create important dates for Company #${targetCompanyId}.`,
+            });
+            return;
+        }
         if (!categoryId || !title || !date) {
             res.status(400).json({ success: false, message: 'Category, title, and date are required.' });
             return;
@@ -198,13 +228,13 @@ async function createImportantDate(req, res, next) {
       )
       OUTPUT INSERTED.ImportantDateID
       VALUES (
-        @companyId, @locationId, @departmentId, @categoryId, @title, @description,
+        @targetCompanyId, @locationId, @departmentId, @categoryId, @title, @description,
         @relatedEmployeeId, @relatedVendor, @relatedCustomer, @referenceNumber,
         @date, @startDate, @expiryDate, @recurrenceType, @responsibleEmployeeId,
         @priority, @notes, @attachment, @autoGenerateTask, @leadDaysForTask,
         @taskAssignedToId, N'Active', @userId, SYSUTCDATETIME(), SYSUTCDATETIME()
       )`, {
-            companyId,
+            targetCompanyId,
             locationId: locationId || null,
             departmentId: departmentId || null,
             categoryId: parseInt(categoryId, 10),
@@ -257,21 +287,30 @@ async function createImportantDate(req, res, next) {
 async function updateImportantDate(req, res, next) {
     try {
         const id = parseInt(req.params.id, 10);
-        const companyId = req.user.companyId;
         const userId = req.user.userId;
-        const { categoryId, title, description, locationId, departmentId, relatedEmployeeId, relatedVendor, relatedCustomer, referenceNumber, date, startDate, expiryDate, recurrenceType, responsibleEmployeeId, priority, notes, attachment, status, autoGenerateTask, leadDaysForTask, taskAssignedToId, } = req.body;
+        const { companyId, categoryId, title, description, locationId, departmentId, relatedEmployeeId, relatedVendor, relatedCustomer, referenceNumber, date, startDate, expiryDate, recurrenceType, responsibleEmployeeId, priority, notes, attachment, status, autoGenerateTask, leadDaysForTask, taskAssignedToId, } = req.body;
         const existing = await (0, db_1.executeQuery)(`SELECT * FROM dbo.ImportantDates WHERE ImportantDateID = @id AND IsDeleted = 0`, { id });
         if (existing.recordset.length === 0) {
             res.status(404).json({ success: false, message: 'Important Date not found.' });
             return;
         }
         const old = existing.recordset[0];
-        const isSuperAdmin = req.tenant?.isSuperAdmin;
-        if (!isSuperAdmin && !req.tenant?.scopeCompanyIds.includes(old.CompanyID)) {
+        const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+        const allowedCompanyIds = req.tenant?.allowedCompanyIds || req.tenant?.scopeCompanyIds || [req.user.companyId];
+        if (!isSuperAdmin && !allowedCompanyIds.includes(old.CompanyID)) {
             res.status(403).json({ success: false, message: 'Forbidden: You do not have permission to update this company\'s date.' });
             return;
         }
+        let targetCompanyId = null;
+        if (companyId !== undefined && companyId !== null && companyId !== '') {
+            targetCompanyId = parseInt(companyId, 10);
+            if (!isSuperAdmin && !allowedCompanyIds.includes(targetCompanyId)) {
+                res.status(403).json({ success: false, message: `Forbidden: You do not have permission to reassign date to Company #${targetCompanyId}.` });
+                return;
+            }
+        }
         await (0, db_1.executeQuery)(`UPDATE dbo.ImportantDates SET
+        CompanyID = ISNULL(@targetCompanyId, CompanyID),
         CategoryID = ISNULL(@categoryId, CategoryID),
         Title = ISNULL(@title, Title),
         Description = @description,
@@ -297,6 +336,7 @@ async function updateImportantDate(req, res, next) {
         UpdatedAt = SYSUTCDATETIME()
        WHERE ImportantDateID = @id`, {
             id,
+            targetCompanyId,
             categoryId: categoryId || null,
             title: title || null,
             description: description !== undefined ? description : old.Description,
@@ -338,7 +378,6 @@ async function updateImportantDate(req, res, next) {
 async function renewImportantDate(req, res, next) {
     try {
         const id = parseInt(req.params.id, 10);
-        const companyId = req.user.companyId;
         const userId = req.user.userId;
         const { newExpiryDate, renewedDate, remarks, attachmentUrl } = req.body;
         if (!newExpiryDate || !renewedDate) {
@@ -351,8 +390,9 @@ async function renewImportantDate(req, res, next) {
             return;
         }
         const current = dateResult.recordset[0];
-        const isSuperAdmin = req.tenant?.isSuperAdmin;
-        if (!isSuperAdmin && !req.tenant?.scopeCompanyIds.includes(current.CompanyID)) {
+        const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+        const allowedCompanyIds = req.tenant?.allowedCompanyIds || req.tenant?.scopeCompanyIds || [req.user.companyId];
+        if (!isSuperAdmin && !allowedCompanyIds.includes(current.CompanyID)) {
             res.status(403).json({ success: false, message: 'Forbidden: You do not have permission to renew this company\'s date.' });
             return;
         }
@@ -406,8 +446,9 @@ async function deleteImportantDate(req, res, next) {
             return;
         }
         const dateRecord = existing.recordset[0];
-        const isSuperAdmin = req.tenant?.isSuperAdmin;
-        if (!isSuperAdmin && !req.tenant?.scopeCompanyIds.includes(dateRecord.CompanyID)) {
+        const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
+        const allowedCompanyIds = req.tenant?.allowedCompanyIds || req.tenant?.scopeCompanyIds || [req.user.companyId];
+        if (!isSuperAdmin && !allowedCompanyIds.includes(dateRecord.CompanyID)) {
             res.status(403).json({ success: false, message: 'Forbidden: You do not have permission to delete this company\'s date.' });
             return;
         }

@@ -47,4 +47,5 @@ backend/uploads/
 # Server credentials & zip archives
 ssh.txt
 *.zip
+*.bat
 

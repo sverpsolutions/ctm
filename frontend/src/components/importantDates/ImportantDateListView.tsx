@@ -4,6 +4,7 @@ import {
   Clock,
   User,
   Building,
+  Building2,
   RefreshCw,
   Eye,
   Trash2,
@@ -44,6 +45,7 @@ export const ImportantDateListView: React.FC<ImportantDateListViewProps> = ({
   const exportToExcel = async () => {
     const data = dates.map((d) => ({
       'Title': d.Title,
+      'Company': d.CompanyName || d.CompanyCode || '-',
       'Category': d.CategoryName,
       'Expiry / Event Date': new Date(d.ExpiryDate || d.Date).toLocaleDateString(),
       'Status': d.Status,
@@ -59,9 +61,10 @@ export const ImportantDateListView: React.FC<ImportantDateListViewProps> = ({
 
   // Export PDF
   const exportToPdf = async () => {
-    const headers = ['Title', 'Category', 'Expiry Date', 'Department', 'Responsible Person', 'Urgency', 'Time Left'];
+    const headers = ['Title', 'Company', 'Category', 'Expiry Date', 'Department', 'Responsible Person', 'Urgency', 'Time Left'];
     const rows = dates.map((d) => [
       d.Title,
+      d.CompanyCode || d.CompanyName || '-',
       d.CategoryName,
       new Date(d.ExpiryDate || d.Date).toLocaleDateString(),
       d.DepartmentName || 'General',
@@ -102,6 +105,7 @@ export const ImportantDateListView: React.FC<ImportantDateListViewProps> = ({
           <thead>
             <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] font-bold select-none">
               <th className="py-3.5 pl-6 pr-3">Title & Reference</th>
+              <th className="py-3.5 px-3">Company</th>
               <th className="py-3.5 px-3">Category</th>
               <th className="py-3.5 px-3">Department</th>
               <th className="py-3.5 px-3">Responsible Person</th>
@@ -114,7 +118,7 @@ export const ImportantDateListView: React.FC<ImportantDateListViewProps> = ({
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
             {dates.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-12 text-center text-slate-400">
+                <td colSpan={9} className="py-12 text-center text-slate-400">
                   No important dates matching the selected filters.
                 </td>
               </tr>
@@ -139,6 +143,13 @@ export const ImportantDateListView: React.FC<ImportantDateListViewProps> = ({
                         {d.ReferenceNumber && <span>Ref: {d.ReferenceNumber}</span>}
                         {d.RelatedVendor && <span>• {d.RelatedVendor}</span>}
                       </div>
+                    </td>
+
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-[11px] border border-slate-200 dark:border-slate-700 max-w-[150px] truncate" title={d.CompanyName || d.CompanyCode}>
+                        <Building2 className="w-3 h-3 text-indigo-500 flex-shrink-0" />
+                        <span className="truncate">{d.CompanyCode || d.CompanyName || 'Co'}</span>
+                      </span>
                     </td>
 
                     <td className="py-3.5 px-3 whitespace-nowrap">

@@ -24,7 +24,7 @@ import { Select } from '../components/common/Select';
 
 export const ImportantDatesPage: React.FC = () => {
   const { hasPermission } = useAuth();
-  const { activeCompanyId } = useTenant();
+  const { activeCompanyId, accessibleCompanies } = useTenant();
   const [searchParams] = useSearchParams();
 
   const [dates, setDates] = useState<ImportantDateItem[]>([]);
@@ -34,6 +34,7 @@ export const ImportantDatesPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   // Filters
+  const [selectedCompanyFilter, setSelectedCompanyFilter] = useState<string>('');
   const [smartCategory, setSmartCategory] = useState<string>('all');
   const [categoryId, setCategoryId] = useState<string>('');
   const [departmentId, setDepartmentId] = useState<string>('');
@@ -64,6 +65,7 @@ export const ImportantDatesPage: React.FC = () => {
       const res = await importantDatesApi.getImportantDates({
         page,
         limit: 15,
+        companyId: selectedCompanyFilter ? parseInt(selectedCompanyFilter, 10) : undefined,
         search: search.trim() || undefined,
         categoryId: categoryId ? parseInt(categoryId, 10) : undefined,
         departmentId: departmentId ? parseInt(departmentId, 10) : undefined,
@@ -90,7 +92,7 @@ export const ImportantDatesPage: React.FC = () => {
 
   useEffect(() => {
     fetchDates(pagination.page);
-  }, [smartCategory, categoryId, departmentId, activeCompanyId]);
+  }, [smartCategory, categoryId, departmentId, activeCompanyId, selectedCompanyFilter]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -173,7 +175,7 @@ export const ImportantDatesPage: React.FC = () => {
         </div>
 
         {/* Search and Secondary Dropdowns */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
@@ -184,6 +186,18 @@ export const ImportantDatesPage: React.FC = () => {
               className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-800 text-xs rounded-xl border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 outline-none focus:border-indigo-500"
             />
           </div>
+
+          <Select
+            value={selectedCompanyFilter}
+            onChange={(e) => setSelectedCompanyFilter(e.target.value)}
+          >
+            <option value="">All Accessible Companies</option>
+            {accessibleCompanies.map((c) => (
+              <option key={c.CompanyID} value={c.CompanyID}>
+                {c.CompanyName} ({c.CompanyCode})
+              </option>
+            ))}
+          </Select>
 
           <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
             <option value="">All 22 Date Categories</option>
