@@ -48,8 +48,8 @@ export const TasksPage: React.FC = () => {
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
 
   // Sorting & Selection
-  const [sortBy, setSortBy] = useState('DueDate');
-  const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>('ASC');
+  const [sortBy, setSortBy] = useState('CreatedAt');
+  const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>('DESC');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
   // Modals
