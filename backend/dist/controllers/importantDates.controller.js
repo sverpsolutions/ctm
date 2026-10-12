@@ -10,6 +10,7 @@ exports.getCategories = getCategories;
 exports.createCategory = createCategory;
 const db_1 = require("../config/db");
 const audit_service_1 = require("../services/audit.service");
+const scheduler_job_1 = require("../jobs/scheduler.job");
 async function getImportantDates(req, res, next) {
     try {
         const isSuperAdmin = req.tenant?.isSuperAdmin || req.user?.roleName === 'Super Admin' || req.user?.isPlatformAdmin;
@@ -258,6 +259,11 @@ async function createImportantDate(req, res, next) {
             userId,
         });
         const newDateId = insertResult.recordset[0].ImportantDateID;
+        // If due within the lead window, generate the linked task now instead of waiting
+        // for the next scheduled run (startup + every 2 hours).
+        if (autoGenerateTask) {
+            await (0, scheduler_job_1.runDailyMaintenanceJob)();
+        }
         // Add Reminders
         if (Array.isArray(reminders)) {
             for (const days of reminders) {
