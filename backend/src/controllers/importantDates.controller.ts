@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { executeQuery } from '../config/db';
 import { logAudit } from '../services/audit.service';
 import { sendNotification } from '../services/notification.service';
+import { runDailyMaintenanceJob } from '../jobs/scheduler.job';
 
 export async function getImportantDates(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -326,6 +327,12 @@ export async function createImportantDate(req: Request, res: Response, next: Nex
     );
 
     const newDateId = insertResult.recordset[0].ImportantDateID;
+
+    // If due within the lead window, generate the linked task now instead of waiting
+    // for the next scheduled run (startup + every 2 hours).
+    if (autoGenerateTask) {
+      await runDailyMaintenanceJob();
+    }
 
     // Add Reminders
     if (Array.isArray(reminders)) {
