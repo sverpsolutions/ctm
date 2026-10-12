@@ -29,6 +29,7 @@ interface TaskListViewProps {
   onTaskClick: (taskId: number) => void;
   selectedIds: number[];
   setSelectedIds: (ids: number[]) => void;
+  onToggleComplete: (taskId: number, isCurrentlyCompleted: boolean) => void;
   sortBy: string;
   sortOrder: 'ASC' | 'DESC';
   onSort: (column: string) => void;
@@ -43,6 +44,7 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
   onTaskClick,
   selectedIds,
   setSelectedIds,
+  onToggleComplete,
   sortBy,
   sortOrder,
   onSort,
@@ -287,6 +289,15 @@ export const TaskListView: React.FC<TaskListViewProps> = ({
                     </td>
                     <td className="py-3.5 pr-6 pl-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => onToggleComplete(task.TaskID, task.EffectiveStatus === 'Completed')}
+                          title={task.EffectiveStatus === 'Completed' ? 'Reopen Task' : 'Mark Complete'}
+                          className={`p-1.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 ${
+                            task.EffectiveStatus === 'Completed' ? 'text-emerald-600' : 'text-slate-400 hover:text-emerald-600'
+                          }`}
+                        >
+                          <CheckSquare className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => onTaskClick(task.TaskID)}
                           title="View Details"

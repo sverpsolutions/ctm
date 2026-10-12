@@ -171,6 +171,19 @@ export const TasksPage: React.FC = () => {
     }
   };
 
+  const handleToggleComplete = async (taskId: number, isCurrentlyCompleted: boolean) => {
+    try {
+      await tasksApi.updateProgress(taskId, {
+        status: isCurrentlyCompleted ? 'In Progress' : 'Completed',
+        percentageComplete: isCurrentlyCompleted ? 0 : 100,
+        remarks: isCurrentlyCompleted ? 'Reopened from task list' : 'Marked complete from task list',
+      });
+      fetchTasks(pagination.page);
+    } catch (err) {
+      console.error('Failed to toggle task completion:', err);
+    }
+  };
+
   const handleDeleteSingle = (id: number) => {
     setTaskToDelete(id);
     setIsDeleteConfirmOpen(true);
@@ -396,6 +409,7 @@ export const TasksPage: React.FC = () => {
           onTaskClick={handleTaskClick}
           selectedIds={selectedIds}
           setSelectedIds={setSelectedIds}
+          onToggleComplete={handleToggleComplete}
           sortBy={sortBy}
           sortOrder={sortOrder}
           onSort={handleSort}
